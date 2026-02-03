@@ -232,3 +232,36 @@ machine learning | 机器学习 | 机械学习 | 机器学习法
                 result = response.choices[0].message.content.strip()
 
                 # 解析术语对照
+                import re 
+                term_dict = {}
+                for line in result.split('\n'):
+                    line = line.strip()
+                    if '|' not in line:
+                        continue
+
+                    parts = [p.strip() for p in line.split('|')]
+                    if len(parts) >= 4:
+                        src_term = parts[0].strip()
+                        src_term = re.sub(r'^\d+[\.\).]\s*','',src_term)
+
+                        #  提取3个译法
+                        translation = [
+                            parts[1].strip(),
+                            parts[2].strip(),
+                            parts[3].strip()
+                        ]
+
+                        translations = [re.sub(r'^\d+[\.\).]\s*','',t) for t in translations]
+
+                        if src_term and all(translations):
+                            term_dict[src_term] = translations
+
+                print(f"  成功解析{len(term_dict)}/{len(terms)} 个术语, 每种三个译法")
+                return term_dict
+            except Exception as e:
+                print(f" 术语翻译失败（尝试{attempt + 1}/{config.MAX_RETRIES}): {str(e)}")
+                if attempt < config.MAX_RETRIES -1:
+                    time.sleep(config.RETRY_DELAY)
+                else:
+                    print(f" 术语翻译失败, 返回空字典")
+                return {}
