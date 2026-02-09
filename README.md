@@ -1,5 +1,9 @@
 # 专利文档翻译系统
 
+![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)
+![License](https://img.shields.io/badge/license-MIT-yellow.svg)
+![Status](https://img.shields.io/badge/status-active-success.svg)
 
 ## 1. 项目结构
 
@@ -36,6 +40,25 @@ patent-translation/
 | **语料库加速** | 支持向量数据库检索类似表达，加速翻译 |
 | **一致性验证** | 检测译文中术语使用的统一性 |
 
+---
+## 🚀 Quick Start
+
+### 1. Clone
+git clone https://github.com/edgetalker/Patent-translation.git
+
+### 2. Install
+pip install -r requirements.txt
+
+### 3. Configure
+cp .env.example .env
+
+### 4. Run
+python api_server.py
+
+### 5. Test
+```bash
+curl http://localhost:8080/health
+```
 ---
 ## 2. 翻译引擎
 + **OpenAI**格式调用：openai/claude/deepseek/qwen
