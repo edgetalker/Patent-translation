@@ -7,10 +7,14 @@
 patent-translation/
 ├── .env                          # 环境变量配置
 ├── config.py                     # 系统配置参数
+├── corpus
+   ├── embeddings.py              # 文本向量化
+   ├── manager.py                 # 向量库的CRUD
 ├── requirements.txt              # Python依赖包列表
 ├── terminology_extraction.py    # 术语提取模块
 ├── translation_core.py          # 核心翻译引擎
 ├── utils.py                     # 工具函数模块
+├── corpus_retrieval.py          # 语料库检索模块
 ├── api_server.py                # FastAPI服务接口
 │   ├── POST /translate          # 翻译API端点
 │   └── GET /health              # 健康检查端点
@@ -42,7 +46,7 @@ curl -X GET http://localhost:8080/health
   "status": "healthy",
   "version": "1.0.0",
   "config": {
-    "llm_base_url": "http://localhost:8000",
+    "llm_base_url": "http://localhost:8080",
     "llm_model": "deepseek-chat",
     "corpus_enabled": true
   }
@@ -149,29 +153,30 @@ curl -Method POST -Uri http://localhost:8080/extract_terminology -Body (@{
 } | ConvertTo-Json) -ContentType 'application/json'
 ```
 ### 语料库管理
-+ 添加语料
++ 添加语料（meta为可选项，按需添加）
 ```bash
-curl -X POST http://localhost:8080/corpus/add \
+ccurl -X POST http://localhost:8080/corpus/add \
   -H "Content-Type: application/json" \
   -d '{
     "entries": [
       {
-        "source": "本发明涉及",
-        "target": "The present invention relates to",
-        "metadata": {"type": "patent_opening"}
+        "source": "本发明涉及一种图像处理方法。",
+        "target": "The present invention relates to an image processing method.",
+        "metadata": {"type": "patent_opening", "category": "method"}
       },
       {
-        "source": "一种基于深度学习的方法",
-        "target": "A method based on deep learning",
-        "metadata": {"domain": "AI"}
+        "source": "该装置包括处理器、存储器和通信模块。",
+        "target": "The device comprises a processor, a memory, and a communication module.",
+        "metadata": {"type": "structure_description", "category": "device"}
       },
       {
-        "source": "所述装置包括",
-        "target": "The device comprises",
-        "metadata": {"type": "patent_description"}
-      }
+        "source": "所述方法包括以下步骤。",
+        "target": "The method includes the following steps.",
+        "metadata": {"type": "method_intro", "category": "method"}
+      },
+      ...
     ],
-    "corpus_id": "ch-zn-技术"
+    "corpus_id": "zh-en-技术"
   }'
   ```
   + 响应示例
