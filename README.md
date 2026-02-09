@@ -5,19 +5,21 @@
 
 ```
 patent-translation/
-├── .env                          # 环境变量配置
-├── config.py                     # 系统配置参数
+├── .env                            # 环境变量配置
+├── config.py                       # 系统配置参数
 ├── corpus
-   ├── embeddings.py              # 文本向量化
-   ├── manager.py                 # 向量库的CRUD
-├── requirements.txt              # Python依赖包列表
-├── terminology_extraction.py    # 术语提取模块
-├── translation_core.py          # 核心翻译引擎
-├── utils.py                     # 工具函数模块
-├── corpus_retrieval.py          # 语料库检索模块
-├── api_server.py                # FastAPI服务接口
-│   ├── POST /translate          # 翻译API端点
-│   └── GET /health              # 健康检查端点
+   ├── embeddings.py                # 文本向量化
+   ├── manager.py                   # 向量库的CRUD
+├── requirements.txt                # Python依赖包列表
+├── terminology_extraction.py       # 术语提取模块
+├── translation_core.py             # 核心翻译引擎
+├── utils.py                        # 工具函数模块
+├── corpus_retrieval.py             # 语料库检索模块
+├── api_server.py                   # FastAPI服务接口
+│   ├── POST /translate             # 翻译API端点
+│   └── POST /extract_terminology   # 术语提取端点
+│   └── POST /corpus/add            # 新增语料端点
+│   └── POST /corpus/search         # 相似度搜索端点
 └── README.md                    
 ```
 
@@ -25,16 +27,21 @@ patent-translation/
 
 | 模块 | 功能说明 |
 |------|---------|
-| **智能分段器** | 按段落语义边界分块，避免句子截断 |
-| **滑动窗口术语提取** | 3000字符窗口+500字符重叠  |
+| **长文本翻译** | 支持完整专利文档输入 |
+| **多语言支持** | 支持多种语言专利表达：中日韩英法德西|
+| **滑动窗口术语提取** | 8000字符窗口+2000字符重叠  |
 | **术语智能去重** | 处理完全相同、包含关系等冗余术语 |
-| **术语翻译** | 提取src术语对应的tgt翻译 |
+| **术语翻译** | 提取源语言术语对应的目标语言翻译 |
 | **术语约束翻译** | 强制使用术语映射表，保证一致性 |
+| **语料库加速** | 支持向量数据库检索类似表达，加速翻译 |
 | **一致性验证** | 检测译文中术语使用的统一性 |
 
 ---
-
-## 2. API 调用
+## 2. 翻译引擎
++ **OpenAI**格式调用：openai/claude/deepseek/qwen
++ 本地部署调用：如：Qwen2.5-14B-AWQ（RTX4090）
+---
+## 3. API 调用
 
 ### 健康检查
 ```python
