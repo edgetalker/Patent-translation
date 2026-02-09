@@ -19,6 +19,10 @@ class Config:
     LLM_API_KEY = os.getenv("LLM_API_KEY", "EMPTY")
     LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://117.50.221.70:8000/v1")
     LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "qwen2.5-14b")
+
+    # ==================== Embedding服务配置 ==================
+    EMBED_BASE_URL = os.getenv("EMBED_BASE_URL", "http://103.234.21.156:11001/api")
+    VECTOR_SIZE = int(os.getenv("VECTOR_SIZE", "1024"))
     
     # ==================== 模型上下文配置 ====================
     MODEL_CONTEXT_WINDOW = 64000    # 实际可用上下文
@@ -34,8 +38,13 @@ class Config:
     # ==================== 翻译分块配置（精度优先）====================
     MAX_CHUNK_LENGTH = int(os.getenv("MAX_CHUNK_LENGTH", "10000"))  
     OVERLAP_LENGTH = int(os.getenv("OVERLAP_LENGTH", "500"))        
-    MAX_TOKENS = int(os.getenv("MAX_TOKENS", "20000"))              
-    
+    MAX_TOKENS = int(os.getenv("MAX_TOKENS", "8000"))    
+
+    # ==================== Qdrant配置 ==================
+    QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
+    QDRANT_PORT: int = int(os.getenv("QDRANT_PORT", "6333"))
+    QDRANT_COLLECTION_NAME: str = "patent_translations"          
+
     # ==================== 性能配置 ====================
     MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
     RETRY_DELAY = int(os.getenv("RETRY_DELAY", "2"))

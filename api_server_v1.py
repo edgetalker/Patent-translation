@@ -8,8 +8,8 @@ from typing import Optional, Dict, List
 import uvicorn
 
 from config import config
-from translation_core import DocumentTranslator
-from terminology_extraction import TerminologyExtractor
+from translation_core_v1 import DocumentTranslator
+from terminology_extraction_v1 import TerminologyExtractor
 from corpus.embeddings import EmbeddingService
 from corpus.manager import CorpusManager
 
@@ -19,15 +19,20 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 初始化翻译器和术语提取器
+# ==================== 初始化 ====================
+
+# 初始化语料库相关组件
 embedding_service = EmbeddingService()
 corpus_manager = CorpusManager(
     qdrant_host=config.QDRANT_HOST,
     qdrant_port=config.QDRANT_PORT,
     embedding_service=embedding_service
 )
+
+# 🆕 修改1: 翻译器初始化时传入 corpus_manager
 translator = DocumentTranslator(corpus_manager=corpus_manager)
 term_extractor = TerminologyExtractor()
+
 # ==================== 数据模型 ====================
 
 class TranslationRequest(BaseModel):
@@ -38,7 +43,7 @@ class TranslationRequest(BaseModel):
     domain: str = "技术"
     use_context: bool = True
     glossary: Optional[Dict[str, str]] = None
-    corpus_id: Optional[str] = None
+    # 🆕 修改2: 添加语料库参数
     use_corpus: bool = False
     corpus_threshold: float = 0.85
 
@@ -49,6 +54,7 @@ class TranslationResponse(BaseModel):
     term_dict: Dict[str, str]
     chunks_info: List[Dict]
     statistics: Dict
+    # 🆕 修改3: 添加语料库统计字段
     corpus_stats: Optional[Dict] = None
 
 
@@ -66,7 +72,7 @@ class TerminologyExtractionRequest(BaseModel):
 class TerminologyExtractionResponse(BaseModel):
     """术语提取响应模型"""
     terms: List[str]
-    term_dict: Dict[str, List[str]]
+    term_dict: Dict[str, str]  # 🆕 修改: 改为 str，不是 List[str]
     statistics: Dict
 
 
@@ -92,7 +98,7 @@ class SearchRequest(BaseModel):
     limit: int = 5
     threshold: float = 0.7
     
-# ==================== AtPI端点 ====================
+# ==================== API端点 ====================
 
 @app.get("/", response_model=HealthResponse)
 async def root():
@@ -104,7 +110,7 @@ async def root():
             "llm_model": config.LLM_MODEL_NAME,
             "max_terms": config.MAX_TERMS,
             "window_size": config.WINDOW_SIZE,
-            "corpus_enabled": True
+            "corpus_enabled": True  # 🆕 添加：标识语料库已启用
         }
     }
 
@@ -131,7 +137,7 @@ async def get_config():
             "window_overlap": config.WINDOW_OVERLAP,
             "min_frequency": config.MIN_TERM_FREQUENCY
         },
-        "corpus": {  
+        "corpus": {  # 🆕 添加：语料库配置
             "qdrant_host": config.QDRANT_HOST,
             "qdrant_port": config.QDRANT_PORT,
             "collection_name": config.QDRANT_COLLECTION_NAME,
@@ -179,6 +185,7 @@ async def translate_document(request: TranslationRequest):
             - corpus_stats: 语料库统计 (如果启用)
     """
     try:
+        # 🆕 修改4: 传递语料库参数
         result = translator.translate_document(
             src_text=request.src_text,
             src_lang=request.src_lang,
@@ -188,7 +195,7 @@ async def translate_document(request: TranslationRequest):
             glossary=request.glossary,
             parallel=True,      
             max_workers=3,
-            corpus_id=request.corpus_id,
+            # 🆕 语料库参数
             use_corpus=request.use_corpus,
             corpus_threshold=request.corpus_threshold
         )
@@ -371,7 +378,8 @@ if __name__ == "__main__":
     print(f"启动翻译服务...")
     print(f"监听地址: {config.API_HOST}:{config.API_PORT}")
     print(f"LLM服务: {config.LLM_BASE_URL}")
-    print(f"模型: {config.LLM_MODEL_NAME}\n")
+    print(f"模型: {config.LLM_MODEL_NAME}")
+    print(f"语料库: Qdrant @ {config.QDRANT_HOST}:{config.QDRANT_PORT}\n")
     
     uvicorn.run(
         app,

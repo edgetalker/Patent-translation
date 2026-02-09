@@ -1,4 +1,5 @@
 # .gitignore
+demo_data/
 .env
 .env.local
 .env.*.local

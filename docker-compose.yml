@@ -1,0 +1,53 @@
+# docker/docker-compose.yml
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: patent-qdrant
+    restart: unless-stopped
+    
+    # 端口映射
+    ports:
+      - "6333:6333"  # HTTP API
+      - "6334:6334"  # gRPC API（可选）
+    
+    # 数据持久化
+    volumes:
+      - ../data/qdrant_storage:/qdrant/storage
+    
+    # 环境变量
+    environment:
+      # 服务配置
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__HOST=0.0.0.0
+      
+      # 性能优化
+      - QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS=4
+      - QDRANT__STORAGE__PERFORMANCE__MAX_OPTIMIZATION_THREADS=2
+      
+      # 日志级别
+      - QDRANT__LOG_LEVEL=INFO
+    
+    # 资源限制（可选，生产环境推荐）
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+    
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  default:
+    name: patent-network

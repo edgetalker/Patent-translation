@@ -6,14 +6,13 @@
 import time
 import asyncio
 import concurrent.futures
+import threading
 from typing import Dict, List, Tuple, Optional
 from openai import OpenAI
-import threading
 
 from config import config
 from utils import split_text_by_paragraph
-from terminology_extraction import TerminologyExtractor
-
+from terminology_extraction_v1 import TerminologyExtractor
 import nest_asyncio
 nest_asyncio.apply()
 
@@ -38,12 +37,12 @@ class DocumentTranslator:
         # 🆕 语料库支持
         self.corpus_manager = corpus_manager
         self.corpus_retriever = None  # 延迟初始化
-
+    
     def _safe_print(self, *args, **kwargs):
         """线程安全的打印"""
         with self.log_lock:
             print(*args, **kwargs)
-    
+            
     def _translate_sentences(
         self,
         sentences: List[Tuple[int, str]],
@@ -281,7 +280,7 @@ class DocumentTranslator:
         """
         self._safe_print(f"\n   🔍 Chunk {chunk_id+1}: 检索语料库...")
         
-        # ✅ 修复：创建全新的事件循环
+        
         try:
             # 创建新的事件循环（不使用当前运行的循环）
             loop = asyncio.new_event_loop()
@@ -413,6 +412,7 @@ class DocumentTranslator:
         parallel: bool = True,
         max_workers: int = 3,
         # 🆕 语料库参数
+        corpus_id: Optional[str] = None,
         use_corpus: bool = False,
         corpus_threshold: float = 0.85
     ) -> Dict:
@@ -455,8 +455,8 @@ class DocumentTranslator:
             )
             if not corpus_id:
                 corpus_id = f"{src_lang}_{tgt_lang}_{domain}"
-            else:
-                corpus_id = None
+        else:
+            corpus_id = None
     
         # Step 1 & 2: 术语处理
         if glossary:
