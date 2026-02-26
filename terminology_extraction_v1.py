@@ -95,6 +95,20 @@ class TerminologyExtractor:
                     print(f"  ❌ 窗口{window_id}术语抽取最终失败")
                     return []
     
+    def _is_independent_term(self, term: str, context: str) -> bool:
+        """
+        检查 term 在 context 中是否作为独立词出现
+        中文：检查字符边界（前后是否为其他汉字）
+        英文：使用 \b 单词边界
+        """
+        has_chinese = bool(re.search(r'[\u4e00-\u9fff]', term))
+        if has_chinese:
+            # 中文：term 独立出现意味着前后不是汉字/字母
+            pattern = r'(?<![a-zA-Z\u4e00-\u9fff])' + re.escape(term) + r'(?![a-zA-Z\u4e00-\u9fff])'
+        else:
+            pattern = r'\b' + re.escape(term) + r'\b'
+        return bool(re.search(pattern, context, re.IGNORECASE))
+    
     def sliding_window_extract(
         self,
         text: str,
@@ -189,16 +203,13 @@ class TerminologyExtractor:
             for seen_term in list(seen_terms):
                 # 只有当term是seen_term的真子串，且不是独立词时才认为冗余
                 if term in seen_term and term != seen_term:
-                    # 检查是否为独立词（用空格或标点分隔）
-                    pattern = r'\b' + re.escape(term) + r'\b'
-                    if not re.search(pattern, seen_term, re.IGNORECASE):
-                        is_redundant = True
-                        break
-                
+                  if not self._is_independent_term(term, seen_term):
+                      is_redundant = True
+                      break
+                  
                 # 反向：如果seen_term是term的真子串，移除seen_term
                 elif seen_term in term and seen_term != term:
-                    pattern = r'\b' + re.escape(seen_term) + r'\b'
-                    if not re.search(pattern, term, re.IGNORECASE):
+                    if not self._is_independent_term(seen_term, term):
                         seen_terms.discard(seen_term)
                         if seen_term in final_terms:
                             final_terms.remove(seen_term)
@@ -223,7 +234,7 @@ class TerminologyExtractor:
         domain: str = "技术"
     ) -> Dict[str, str]:
         """
-        将提取的术语翻译成目标语言（一对一翻译）
+        将提取的术语翻译成目标语言
         
         Args:
             terms: 源语言术语列表
@@ -349,19 +360,6 @@ optimization algorithm | 优化算法
                     if src_term == tgt_term:
                         failed_lines.append(f"第{line_num}行源术语和译法相同: {src_term}")
                         continue
-                    
-                    # ✅ 验证：语言方向正确
-                    # 简单检查：中文应该有汉字，英文应该主要是字母
-                    if src_lang == 'zh':
-                        # 中文源术语应该包含汉字
-                        if not re.search(r'[\u4e00-\u9fff]', src_term):
-                            failed_lines.append(f"第{line_num}行源术语应为中文: {src_term}")
-                            continue
-                    elif src_lang == 'en':
-                        # 英文源术语应该主要是字母
-                        if not re.search(r'[a-zA-Z]', src_term):
-                            failed_lines.append(f"第{line_num}行源术语应为英文: {src_term}")
-                            continue
                     
                     # 通过所有验证，添加到字典
                     term_dict[src_term] = tgt_term

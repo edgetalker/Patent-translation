@@ -31,8 +31,9 @@ def split_text_by_paragraph(text: str, max_length: int = 1500) -> List[Dict]:
     
     chunks = []
     current_chunk = ""
-    current_start = 0
     chunk_id = 0
+    global_pos = 0
+    chunk_start_pos = 0
     
     for para in paragraphs:
         if len(para) > max_length:
@@ -40,15 +41,19 @@ def split_text_by_paragraph(text: str, max_length: int = 1500) -> List[Dict]:
                 chunks.append({
                     "text": current_chunk.strip(),
                     "chunk_id": chunk_id,
-                    "start_pos": current_start
+                    "start_pos": chunk_start_pos
                 })
                 chunk_id += 1
+                global_pos += len(current_chunk)
                 current_chunk = ""
+                chunk_start_pos = global_pos
             
             sentences = re.split(r'([。！？\.!?])', para)
-            sentences = [''.join(sentences[i:i+2]) for i in range(0, len(sentences), 2)]
-            
-            for sent in sentences:
+            pairs = [''.join(sentences[i:i+2]) for i in range(0, len(sentences)-1 , 2)]
+            if len(sentences) % 2 == 1 and sentences[-1].strip():
+                pairs.append(sentences[-1])
+
+            for sent in pairs:
                 if len(current_chunk) + len(sent) < max_length:
                     current_chunk += sent
                 else:
@@ -56,11 +61,12 @@ def split_text_by_paragraph(text: str, max_length: int = 1500) -> List[Dict]:
                         chunks.append({
                             "text": current_chunk.strip(),
                             "chunk_id": chunk_id,
-                            "start_pos": current_start
+                            "start_pos": chunk_start_pos
                         })
                         chunk_id += 1
+                        global_pos += len(current_chunk)
+                        chunk_start_pos = global_pos
                     current_chunk = sent
-                    current_start += len(current_chunk)
         
         elif len(current_chunk) + len(para) + 2 < max_length:
             current_chunk += para + "\n\n"
@@ -68,17 +74,18 @@ def split_text_by_paragraph(text: str, max_length: int = 1500) -> List[Dict]:
             chunks.append({
                 "text": current_chunk.strip(),
                 "chunk_id": chunk_id,
-                "start_pos": current_start
+                "start_pos": chunk_start_pos
             })
             chunk_id += 1
+            global_pos += len(current_chunk)
             current_chunk = para + "\n\n"
-            current_start += len(current_chunk)
+            chunk_start_pos += global_pos
     
     if current_chunk.strip():
         chunks.append({
             "text": current_chunk.strip(),
             "chunk_id": chunk_id,
-            "start_pos": current_start
+            "start_pos": chunk_start_pos
         })
     
     return chunks

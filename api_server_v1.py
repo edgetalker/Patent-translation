@@ -29,7 +29,6 @@ corpus_manager = CorpusManager(
     embedding_service=embedding_service
 )
 
-# 🆕 修改1: 翻译器初始化时传入 corpus_manager
 translator = DocumentTranslator(corpus_manager=corpus_manager)
 term_extractor = TerminologyExtractor()
 
@@ -43,7 +42,6 @@ class TranslationRequest(BaseModel):
     domain: str = "技术"
     use_context: bool = True
     glossary: Optional[Dict[str, str]] = None
-    # 🆕 修改2: 添加语料库参数
     use_corpus: bool = False
     corpus_threshold: float = 0.85
 
@@ -54,7 +52,6 @@ class TranslationResponse(BaseModel):
     term_dict: Dict[str, str]
     chunks_info: List[Dict]
     statistics: Dict
-    # 🆕 修改3: 添加语料库统计字段
     corpus_stats: Optional[Dict] = None
 
 
@@ -72,7 +69,7 @@ class TerminologyExtractionRequest(BaseModel):
 class TerminologyExtractionResponse(BaseModel):
     """术语提取响应模型"""
     terms: List[str]
-    term_dict: Dict[str, str]  # 🆕 修改: 改为 str，不是 List[str]
+    term_dict: Dict[str, str]  
     statistics: Dict
 
 
@@ -110,7 +107,7 @@ async def root():
             "llm_model": config.LLM_MODEL_NAME,
             "max_terms": config.MAX_TERMS,
             "window_size": config.WINDOW_SIZE,
-            "corpus_enabled": True  # 🆕 添加：标识语料库已启用
+            "corpus_enabled": True  
         }
     }
 
@@ -137,7 +134,7 @@ async def get_config():
             "window_overlap": config.WINDOW_OVERLAP,
             "min_frequency": config.MIN_TERM_FREQUENCY
         },
-        "corpus": {  # 🆕 添加：语料库配置
+        "corpus": {  
             "qdrant_host": config.QDRANT_HOST,
             "qdrant_port": config.QDRANT_PORT,
             "collection_name": config.QDRANT_COLLECTION_NAME,
@@ -185,7 +182,6 @@ async def translate_document(request: TranslationRequest):
             - corpus_stats: 语料库统计 (如果启用)
     """
     try:
-        # 🆕 修改4: 传递语料库参数
         result = translator.translate_document(
             src_text=request.src_text,
             src_lang=request.src_lang,
@@ -195,7 +191,7 @@ async def translate_document(request: TranslationRequest):
             glossary=request.glossary,
             parallel=True,      
             max_workers=3,
-            # 🆕 语料库参数
+            # 语料库参数
             use_corpus=request.use_corpus,
             corpus_threshold=request.corpus_threshold
         )

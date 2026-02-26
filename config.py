@@ -38,7 +38,8 @@ class Config:
     # ==================== 翻译分块配置（精度优先）====================
     MAX_CHUNK_LENGTH = int(os.getenv("MAX_CHUNK_LENGTH", "10000"))  
     OVERLAP_LENGTH = int(os.getenv("OVERLAP_LENGTH", "500"))        
-    MAX_TOKENS = int(os.getenv("MAX_TOKENS", "8000"))    
+    MAX_TOKENS = int(os.getenv("MAX_TOKENS", "8000"))
+    MAX_INJECT_TERMS = int(os.getenv("MAX_INJECT_TERMS", 25))    
 
     # ==================== Qdrant配置 ==================
     QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
