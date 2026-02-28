@@ -48,6 +48,7 @@ class DocumentTranslator:
         tgt_lang: str,
         domain: str,
         term_dict: Dict[str, str] = None,
+        domain_prompt: str = None,
         chunk_id: int = 0
     ) -> Dict[int, str]:
         """
@@ -59,6 +60,7 @@ class DocumentTranslator:
             tgt_lang: 目标语言
             domain: 领域
             term_dict: 术语字典
+            domain_prompt: 领域提示词
             chunk_id: 块ID（用于日志）
         
         Returns:
@@ -90,6 +92,9 @@ class DocumentTranslator:
                 f"\n4. 按原顺序输出译文"
             )
         
+        if domain_prompt:
+            prompt_parts.append(domain_prompt)
+            
         prompt_parts.append(
             f"\n请将以下{len(sentence_texts)}句{src_lang_name}翻译成{tgt_lang_name}，"
             f"每句一行，按顺序输出：\n\n{batch_text}"
@@ -139,6 +144,7 @@ class DocumentTranslator:
         tgt_lang: str,
         domain: str,
         term_dict: Dict[str, str] = None,
+        domain_prompt: str = None,
         context: str = None,
         # 语料库参数
         use_corpus: bool = False,
@@ -156,6 +162,7 @@ class DocumentTranslator:
             tgt_lang: 目标语言代码
             domain: 领域信息
             term_dict: 术语对照字典
+            domain_prompt: 领域提示词
             context: 前文上下文
             use_corpus: 是否使用语料库检索
             corpus_id: 语料库ID
@@ -176,6 +183,7 @@ class DocumentTranslator:
                 tgt_lang=tgt_lang,
                 domain=domain,
                 term_dict=term_dict,
+                domain_prompt=domain_prompt,
                 corpus_id=corpus_id,
                 corpus_threshold=corpus_threshold,
                 chunk_start=chunk_start
@@ -215,6 +223,9 @@ class DocumentTranslator:
             
             print(f" Chunk {chunk_id+1}: 术语表{len(term_dict)}个, 精确匹配{exact_matches}个 → LLM将灵活匹配全部")
         
+        if domain_prompt:
+            prompt_parts.append(domain_prompt)
+
         if context:
             prompt_parts.append(f"\n【前文参考】\n{context[:200]}...\n")
         
@@ -271,6 +282,7 @@ class DocumentTranslator:
         tgt_lang: str,
         domain: str,
         term_dict: Dict[str, str],
+        domain_prompt: str,
         corpus_id: str,
         corpus_threshold: float,
         chunk_start: float
@@ -315,6 +327,7 @@ class DocumentTranslator:
                 src_lang=src_lang,
                 tgt_lang=tgt_lang,
                 domain=domain,
+                domain_prompt=domain_prompt,
                 term_dict=term_dict,
                 use_corpus=False
             )
@@ -348,6 +361,7 @@ class DocumentTranslator:
                 tgt_lang=tgt_lang,
                 domain=domain,
                 term_dict=relevant_terms,
+                domain_prompt=domain_prompt,
                 chunk_id=chunk_id
             )
             
@@ -460,6 +474,7 @@ class DocumentTranslator:
         domain: str = "技术",
         use_context: bool = True,
         glossary: Dict[str, str] = None,
+        domain_prompt: str = None,
         parallel: bool = True,
         max_workers: int = 3,
         # 🆕 语料库参数
@@ -477,6 +492,7 @@ class DocumentTranslator:
             domain: 领域信息
             use_context: 是否使用上下文管理（并行模式下自动禁用）
             glossary: 术语对照字典
+            domain_prompt: 领域提示词
             parallel: 是否启用并行翻译
             max_workers: 并行翻译的最大工作线程数
             corpus_id: 语料库ID，不传则自动生成
@@ -497,7 +513,7 @@ class DocumentTranslator:
     
         start_time = time.time()
         
-        # 🆕 初始化语料库检索器
+        # 初始化语料库检索器
         if use_corpus and self.corpus_manager:
             from corpus_retrieval import CorpusRetriever
             self.corpus_retriever = CorpusRetriever(
@@ -530,7 +546,7 @@ class DocumentTranslator:
         chunks = split_text_by_paragraph(src_text, config.MAX_CHUNK_LENGTH)
         print(f"   文档已分为 {len(chunks)} 个块")
         
-        # 🆕 语料库统计
+        # 语料库统计
         corpus_stats = {
             "enabled": use_corpus and self.corpus_manager is not None,
             "total_sentences": 0,
@@ -561,6 +577,7 @@ class DocumentTranslator:
                     tgt_lang=tgt_lang,
                     domain=domain,
                     term_dict=term_dict,
+                    domain_prompt=domain_prompt,
                     context=None,
                     use_corpus=use_corpus,
                     corpus_id=corpus_id,
@@ -582,7 +599,7 @@ class DocumentTranslator:
                         translations[idx] = translation
                         chunk_stats[idx] = stats
                         
-                        # 🆕 累计语料库统计
+                        # 累计语料库统计
                         if stats:
                             corpus_stats["total_sentences"] += stats["total_sentences"]
                             corpus_stats["total_hits"] += stats["hits"]
@@ -620,6 +637,7 @@ class DocumentTranslator:
                     tgt_lang=tgt_lang,
                     domain=domain,
                     term_dict=term_dict,
+                    domain_prompt=domain_prompt,
                     context=context,
                     use_corpus=use_corpus,
                     corpus_id=corpus_id,
@@ -628,7 +646,7 @@ class DocumentTranslator:
                 
                 translations.append(translation)
                 
-                # 🆕 累计语料库统计
+                # 累计语料库统计
                 if stats:
                     corpus_stats["total_sentences"] += stats["total_sentences"]
                     corpus_stats["total_hits"] += stats["hits"]
@@ -637,7 +655,7 @@ class DocumentTranslator:
                 if not use_corpus:
                     print(f"   ✓ 完成，输出长度: {len(translation)} 字符")
     
-        # 🆕 计算总命中率
+        # 计算总命中率
         if corpus_stats["total_sentences"] > 0:
             corpus_stats["overall_hit_rate"] = corpus_stats["total_hits"] / corpus_stats["total_sentences"]
     
@@ -676,7 +694,7 @@ class DocumentTranslator:
         print(f"{'='*60}")
         print(f"翻译模式: {'⚡ 并行翻译' if parallel else '🐌 顺序翻译'}")
         
-        # 🆕 语料库统计输出
+        # 语料库统计输出
         if corpus_stats["enabled"]:
             print(f"语料库加速: 🔍 已启用")
             print(f"  - 总句子数: {corpus_stats['total_sentences']}")
@@ -695,5 +713,5 @@ class DocumentTranslator:
             "term_dict": term_dict,
             "chunks_info": [{"chunk_id": c["chunk_id"], "length": len(c["text"])} for c in chunks],
             "statistics": statistics,
-            "corpus_stats": corpus_stats  # 🆕 语料库统计
+            "corpus_stats": corpus_stats
         }
