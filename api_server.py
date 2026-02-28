@@ -42,6 +42,7 @@ class TranslationRequest(BaseModel):
     domain: str = "技术"
     use_context: bool = True
     glossary: Optional[Dict[str, str]] = None
+    domain_prompt: Optional[str] = None
     use_corpus: bool = False
     corpus_threshold: float = 0.85
 
@@ -170,6 +171,7 @@ async def translate_document(request: TranslationRequest):
             - domain: 领域 (默认"技术")
             - use_context: 是否使用上下文 (默认True)
             - glossary: 术语表 (可选)
+            - domain_prompt: 领域提示词（可选）
             - use_corpus: 是否使用语料库加速 (默认False)
             - corpus_threshold: 相似度阈值 (默认0.85)
     
@@ -189,6 +191,7 @@ async def translate_document(request: TranslationRequest):
             domain=request.domain,
             use_context=request.use_context,
             glossary=request.glossary,
+            domain_prompt=request.domain_prompt,
             parallel=True,      
             max_workers=3,
             # 语料库参数
