@@ -6,16 +6,13 @@
 import time
 import asyncio
 import concurrent.futures
+import threading
 from typing import Dict, List, Tuple, Optional
 from openai import OpenAI
-import threading
 
 from config import config
 from utils import split_text_by_paragraph
 from terminology_extraction import TerminologyExtractor
-
-import nest_asyncio
-nest_asyncio.apply()
 
 class DocumentTranslator:
     """文档翻译器（支持语料库加速）"""
@@ -38,12 +35,12 @@ class DocumentTranslator:
         # 🆕 语料库支持
         self.corpus_manager = corpus_manager
         self.corpus_retriever = None  # 延迟初始化
-
+    
     def _safe_print(self, *args, **kwargs):
         """线程安全的打印"""
         with self.log_lock:
             print(*args, **kwargs)
-    
+            
     def _translate_sentences(
         self,
         sentences: List[Tuple[int, str]],
@@ -143,7 +140,7 @@ class DocumentTranslator:
         domain: str,
         term_dict: Dict[str, str] = None,
         context: str = None,
-        # 🆕 语料库参数
+        # 语料库参数
         use_corpus: bool = False,
         corpus_id: str = None,
         corpus_threshold: float = 0.85
@@ -169,7 +166,7 @@ class DocumentTranslator:
         """
         chunk_start = time.time()
         
-        # 🆕 语料库检索分支
+        # 语料库检索分支
         if use_corpus and self.corpus_retriever and corpus_id:
             return self._translate_chunk_with_corpus(
                 chunk_text=chunk_text,
@@ -184,7 +181,6 @@ class DocumentTranslator:
                 chunk_start=chunk_start
             )
         
-        # ✅ 原有逻辑：直接翻译整个chunk
         src_lang_name = config.get_language_name(src_lang)
         tgt_lang_name = config.get_language_name(tgt_lang)
         
@@ -194,11 +190,17 @@ class DocumentTranslator:
         ]
         
         if term_dict:
+            relevant_terms = self._get_relevant_terms(
+                chunk_text=chunk_text,
+                term_dict=term_dict,
+                max_inject=config.MAX_INJECT_TERMS
+            )
+
             chunk_lower = chunk_text.lower()
-            quick_matches = sum(1 for term in term_dict.keys() if term.lower() in chunk_lower)
-            
-            terms_list = "\n".join([f"  - {src} → {tgt}" for src, tgt in term_dict.items()])
-            
+            exact_matches = sum(1 for src in relevant_terms if src.lower() in chunk_lower)
+    
+            terms_list = "\n".join([f"  - {src} → {tgt}" for src, tgt in relevant_terms.items()])
+    
             prompt_parts.append(
                 f"\n【术语表】以下是{domain}领域的专业术语对照表（共{len(term_dict)}个）：\n{terms_list}\n"
                 f"\n【重要翻译要求】"
@@ -211,7 +213,7 @@ class DocumentTranslator:
                 f"\n4. 对于多词术语，确保整体翻译的准确性"
             )
             
-            print(f" Chunk {chunk_id+1}: 术语表{len(term_dict)}个, 精确匹配{quick_matches}个 → LLM将灵活匹配全部")
+            print(f" Chunk {chunk_id+1}: 术语表{len(term_dict)}个, 精确匹配{exact_matches}个 → LLM将灵活匹配全部")
         
         if context:
             prompt_parts.append(f"\n【前文参考】\n{context[:200]}...\n")
@@ -250,7 +252,7 @@ class DocumentTranslator:
                 print(f"   ⏱️  Chunk {chunk_id+1} 耗时: Prompt构建{prompt_time:.2f}s + API调用{api_time:.2f}s = {total_time:.2f}s")
                 print(f"      输入{len(chunk_text)}字 → 输出{len(translation)}字 ({len(translation)/len(chunk_text):.2f}x)")
                 
-                return translation, None  # 🆕 返回元组，第二个元素为None
+                return translation, None  
                 
             except Exception as e:
                 print(f"  ⚠️  翻译chunk {chunk_id + 1} 失败 (尝试 {attempt + 1}/{config.MAX_RETRIES}): {str(e)}")
@@ -281,24 +283,29 @@ class DocumentTranslator:
         """
         self._safe_print(f"\n   🔍 Chunk {chunk_id+1}: 检索语料库...")
         
-        # ✅ 修复：创建全新的事件循环
         try:
-            # 创建新的事件循环（不使用当前运行的循环）
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            try:
-                retrieval_result = loop.run_until_complete(
-                    self.corpus_retriever.retrieve_for_chunk(
-                        chunk=chunk_text,
-                        corpus_id=corpus_id,
-                        threshold=corpus_threshold
-                    )
+            retrieval_result = asyncio.run(
+                self.corpus_retriever.retrieve_for_chunk(
+                    chunk=chunk_text,
+                    corpus_id=corpus_id,
+                    threshold=corpus_threshold
                 )
-            finally:
-                # 确保循环被关闭
-                loop.close()
-                
+            )    
+        except RuntimeError as e:
+            if "cannot be called when another event loop is running" in str(e):
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(
+                        asyncio.run,
+                        self.corpus_retriever.retrieve_for_chunk(
+                            chunk=chunk_text,
+                            corpus_id=corpus_id, 
+                            threshold=corpus_threshold
+                        )
+                    )
+                    retrieval_result = future.result()
+            else:
+                raise
         except Exception as e:
             self._safe_print(f"   ⚠️  检索失败: {str(e)}，回退到直接翻译")
             translation, _ = self.translate_chunk(
@@ -326,13 +333,21 @@ class DocumentTranslator:
         if unmatched:
             self._safe_print(f"      🤖 LLM翻译 {len(unmatched)} 句...")
             llm_start = time.time()
-            
+
+            unmatched_text = "\n".join(sent for _, sent in unmatched)
+
+            relevant_terms = self._get_relevant_terms(
+                chunk_text=unmatched_text,
+                term_dict=term_dict,
+                max_inject=config.MAX_INJECT_TERMS
+            ) if term_dict else None
+
             llm_translations = self._translate_sentences(
                 sentences=unmatched,
                 src_lang=src_lang,
                 tgt_lang=tgt_lang,
                 domain=domain,
-                term_dict=term_dict,
+                term_dict=relevant_terms,
                 chunk_id=chunk_id
             )
             
@@ -361,6 +376,41 @@ class DocumentTranslator:
         }
         
         return translation, stats
+    
+    def _get_relevant_terms(
+        self,
+        chunk_text: str,
+        term_dict: Dict[str, str],
+        max_inject: int = 25
+    ) -> Dict[str, str]:
+        """
+        语言无关的术语过滤：精确匹配优先 + 频率保底
+        
+        Args:
+            chunk_text: 当前 chunk 文本
+            term_dict: 完整术语字典（已按提取频率排序）
+            max_inject: 最大注入数量
+        
+        Returns:
+            过滤后的术语字典
+        """
+        chunk_lower = chunk_text.lower()
+        
+        # 第一层：精确子串匹配，语言无关
+        matched = {
+            src: tgt for src, tgt in term_dict.items()
+            if src.lower() in chunk_lower
+        }
+        
+        # 第二层：精确匹配不足上限时，按频率顺序补足
+        if len(matched) < max_inject:
+            for src, tgt in term_dict.items():
+                if src not in matched:
+                    matched[src] = tgt
+                if len(matched) >= max_inject:
+                    break
+        
+        return matched
     
     def validate_terminology_consistency(
         self,
@@ -413,6 +463,7 @@ class DocumentTranslator:
         parallel: bool = True,
         max_workers: int = 3,
         # 🆕 语料库参数
+        corpus_id: Optional[str] = None,
         use_corpus: bool = False,
         corpus_threshold: float = 0.85
     ) -> Dict:
@@ -428,6 +479,7 @@ class DocumentTranslator:
             glossary: 术语对照字典
             parallel: 是否启用并行翻译
             max_workers: 并行翻译的最大工作线程数
+            corpus_id: 语料库ID，不传则自动生成
             use_corpus: 是否使用语料库检索加速
             corpus_threshold: 语料库相似度阈值
         
@@ -455,8 +507,8 @@ class DocumentTranslator:
             )
             if not corpus_id:
                 corpus_id = f"{src_lang}_{tgt_lang}_{domain}"
-            else:
-                corpus_id = None
+        else:
+            corpus_id = None
     
         # Step 1 & 2: 术语处理
         if glossary:

@@ -19,15 +19,19 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 初始化翻译器和术语提取器
+# ==================== 初始化 ====================
+
+# 初始化语料库相关组件
 embedding_service = EmbeddingService()
 corpus_manager = CorpusManager(
     qdrant_host=config.QDRANT_HOST,
     qdrant_port=config.QDRANT_PORT,
     embedding_service=embedding_service
 )
+
 translator = DocumentTranslator(corpus_manager=corpus_manager)
 term_extractor = TerminologyExtractor()
+
 # ==================== 数据模型 ====================
 
 class TranslationRequest(BaseModel):
@@ -38,7 +42,6 @@ class TranslationRequest(BaseModel):
     domain: str = "技术"
     use_context: bool = True
     glossary: Optional[Dict[str, str]] = None
-    corpus_id: Optional[str] = None
     use_corpus: bool = False
     corpus_threshold: float = 0.85
 
@@ -66,7 +69,7 @@ class TerminologyExtractionRequest(BaseModel):
 class TerminologyExtractionResponse(BaseModel):
     """术语提取响应模型"""
     terms: List[str]
-    term_dict: Dict[str, List[str]]
+    term_dict: Dict[str, str]  
     statistics: Dict
 
 
@@ -92,7 +95,7 @@ class SearchRequest(BaseModel):
     limit: int = 5
     threshold: float = 0.7
     
-# ==================== AtPI端点 ====================
+# ==================== API端点 ====================
 
 @app.get("/", response_model=HealthResponse)
 async def root():
@@ -104,7 +107,7 @@ async def root():
             "llm_model": config.LLM_MODEL_NAME,
             "max_terms": config.MAX_TERMS,
             "window_size": config.WINDOW_SIZE,
-            "corpus_enabled": True
+            "corpus_enabled": True  
         }
     }
 
@@ -188,7 +191,7 @@ async def translate_document(request: TranslationRequest):
             glossary=request.glossary,
             parallel=True,      
             max_workers=3,
-            corpus_id=request.corpus_id,
+            # 语料库参数
             use_corpus=request.use_corpus,
             corpus_threshold=request.corpus_threshold
         )
@@ -371,7 +374,8 @@ if __name__ == "__main__":
     print(f"启动翻译服务...")
     print(f"监听地址: {config.API_HOST}:{config.API_PORT}")
     print(f"LLM服务: {config.LLM_BASE_URL}")
-    print(f"模型: {config.LLM_MODEL_NAME}\n")
+    print(f"模型: {config.LLM_MODEL_NAME}")
+    print(f"语料库: Qdrant @ {config.QDRANT_HOST}:{config.QDRANT_PORT}\n")
     
     uvicorn.run(
         app,
