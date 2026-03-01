@@ -5,10 +5,11 @@
 > 在使用外部术语库的前提下保证全文术语 100% 一致性，
 > 实现 8K 字符文档约 6 分钟内处理完成（无语料库基准）。
 > 
-> 系统当前为 Pipeline 架构（Fallback 层），正在向 Agent 架构演进。
+> 系统采用 LangGraph Agent 架构，将术语提取、并行翻译、一致性验证封装为独立 Tool，通过 Orchestrator 实现完整 Tool-Use 闭环；Pipeline 层作为降级容错保障，异常路径下自动切换。
 
 ![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)
+![LangGraph](https://img.shields.io/badge/LangGraph-Agent-purple.svg)
 ![Qdrant](https://img.shields.io/badge/Qdrant-Vector_DB-DC143C)
 ![vLLM](https://img.shields.io/badge/vLLM-Inference-orange)
 ![Status](https://img.shields.io/badge/status-active-success.svg)
@@ -18,6 +19,10 @@
 
 ```
 patent-translation/
+├── agent/
+│   ├── state.py               # TranslationState 定义
+│   ├── tools.py               # 三个核心 Tool（术语提取/并行翻译/一致性验证）
+│   └── graph.py               # LangGraph Orchestrator + 路由逻辑
 ├── api_server.py              # FastAPI 服务层，7 个 RESTful 端点
 ├── translation_core.py        # 翻译核心：并行分块 + 语料库加速双分支
 ├── terminology_extraction.py  # 滑动窗口术语提取 + 双语术语翻译
@@ -36,42 +41,36 @@ patent-translation/
 输入：文档 + 目标语言 [+ 术语表]
          │
          ▼
-┌─────────────────────────────────┐
-│  术语处理层                      │
-│  ① 滑动窗口提取（若无传入术语表）  │
-│  ② 跨窗口频率统计 + 语言自适应去重 │
-│  ③ LLM 术语翻译 → 双语术语表      │
-└────────────┬────────────────────┘
-             │
-             ▼
-┌─────────────────────────────────┐
-│  分块层                          │
-│  段落感知分块（保持语义完整性）     │
-└────────────┬────────────────────┘
-             │
-      ┌──────┴──────┐
-      ▼             ▼
-┌──────────┐  ┌─────────────────────┐
-│ 直接翻译  │  │  RAG 语料库加速      │
-│ ThreadPool│  │  Qdrant 语义检索     │
-│ 3线程并行  │  │  命中 → 复用译文     │
-│           │  │  未命中 → LLM 翻译   │
-└─────┬─────┘  └──────────┬──────────┘
-      └──────┬────────────┘
-             ▼
-┌─────────────────────────────────┐
-│  后处理层                        │
-│  合并 + 术语一致性验证            │
-└─────────────────────────────────┘
+┌─────────────────────────────────────────-
+│  Orchestrator（LangGraph StateGraph）    │
+│  动态调度 Tool，管理状态与重试路由           │
+└───┬─────────────┬──────────────┬────────┘
+    ▼             ▼              ▼
+┌────────┐  ┌──────────┐  ┌──────────┐
+│ Tool 1 │  │  Tool 2  │  │  Tool 3  │
+│ 术语提取│→ │ 并行翻译   │→ │ 一致性    │
+│滑动窗口 │  │3线程+RAG  │  │   验证    │
+│术语注入 │  │Qdrant加速 │  │          │
+└────────┘  └──────────┘  └──────────┘
+                                │
+                    ┌───────────┴──────────┐
+                    ▼                      ▼
+             [验证通过 → END]    [失败 → 重试/Pipeline降级]
+                                           │
+                               ┌───────────┘
+                               ▼
+                    ┌─────────────────────┐
+                    │  Pipeline Fallback  │
+                    │  （降级容错保障）      │
+                    └─────────────────────┘
 ```
-
-> **注**：当前为 Pipeline 架构，各处理阶段已按职责拆分，
-> 为后续 Agent 化改造（各阶段封装为独立 Tool）预留接口边界。
 
 ## 核心模块功能
 
 | 模块 | 说明 |
 |------|------|
+| **LangGraph Orchestrator** | 基于 StateGraph 编排三个 Tool，验证失败自动重试（上限 3 次），超限降级至 Pipeline |
+| **Pipeline Fallback** | 异常路径下调用原 Pipeline，保证系统在任意故障模式下稳定输出 |
 | **滑动窗口术语提取** | 窗口 8000 字符 / 重叠 2000 字符，跨窗口频率统计解决长文档术语覆盖不全问题 |
 | **语言自适应术语去重** | 中文使用字符边界匹配，英文使用 \b 单词边界，避免正则对中文失效 |
 | **精确匹配优先的术语注入** | 每 chunk 注入上限 25 条，精确命中优先 + 频率保底，避免全量注入稀释 LLM 注意力 |
@@ -146,10 +145,8 @@ curl http://localhost:8080/health
 - [x] 精确匹配优先的术语注入策略（上限 25 条）
 - [x] RAG 语料库加速（Qdrant + 并行翻译）
 - [x] FastAPI 7 模块 RESTful 服务
-
-**进行中**
-- [ ] Agent 化重构：现有 Pipeline 各阶段封装为独立 Tool
-- [ ] Orchestrator 层：引入调度策略，支持动态选择翻译路径
+- [x] Agent 化重构：Pipeline 各阶段封装为独立 Tool（LangGraph）
+- [x] Orchestrator 层：动态路由、重试机制、Pipeline 降级容错
 
 **计划中**
 - [ ] MoE 微调：基于专利领域数据进行监督微调

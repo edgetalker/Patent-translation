@@ -7,6 +7,9 @@ from pydantic import BaseModel
 from typing import Optional, Dict, List
 import uvicorn
 
+from agent.graph import patent_agent
+from agent.tools import init_tools
+
 from config import config
 from translation_core import DocumentTranslator
 from terminology_extraction import TerminologyExtractor
@@ -31,6 +34,8 @@ corpus_manager = CorpusManager(
 
 translator = DocumentTranslator(corpus_manager=corpus_manager)
 term_extractor = TerminologyExtractor()
+
+init_tools(corpus_manager=corpus_manager) 
 
 # ==================== 数据模型 ====================
 
@@ -161,59 +166,71 @@ async def health_check():
 @app.post("/translate", response_model=TranslationResponse)
 async def translate_document(request: TranslationRequest):
     """
-    翻译长文档（支持语料库加速）
-    
-    Args:
-        request: 翻译请求
-            - src_text: 源文本
-            - src_lang: 源语言代码
-            - tgt_lang: 目标语言代码
-            - domain: 领域 (默认"技术")
-            - use_context: 是否使用上下文 (默认True)
-            - glossary: 术语表 (可选)
-            - domain_prompt: 领域提示词（可选）
-            - use_corpus: 是否使用语料库加速 (默认False)
-            - corpus_threshold: 相似度阈值 (默认0.85)
-    
-    Returns:
-        TranslationResponse: 翻译结果
-            - translation: 翻译文本
-            - term_dict: 术语字典
-            - chunks_info: 分块信息
-            - statistics: 统计信息
-            - corpus_stats: 语料库统计 (如果启用)
+    翻译长文档（Agent 架构 + Pipeline 降级）
     """
     try:
-        result = translator.translate_document(
-            src_text=request.src_text,
-            src_lang=request.src_lang,
-            tgt_lang=request.tgt_lang,
-            domain=request.domain,
-            use_context=request.use_context,
-            glossary=request.glossary,
-            domain_prompt=request.domain_prompt,
-            parallel=True,      
-            max_workers=3,
-            # 语料库参数
-            use_corpus=request.use_corpus,
-            corpus_threshold=request.corpus_threshold
-        )
+        # 构建初始 State
+        initial_state = {
+            "src_text":         request.src_text,
+            "src_lang":         request.src_lang,
+            "tgt_lang":         request.tgt_lang,
+            "domain":           request.domain,
+            "glossary":         request.glossary,
+            "domain_prompt":    request.domain_prompt,
+            "use_corpus":       request.use_corpus,
+            "corpus_id":        None,
+            "corpus_threshold": request.corpus_threshold,
+            # Agent 控制流初始值
+            "messages":             [],
+            "use_pipeline_fallback": False,
+            "retry_count":          0,
+            "validation_passed":    False,
+            "inconsistencies":      [],
+            "translated_chunks":    [],
+            "final_translation":    "",
+        }
         
-        # 日志输出
-        if request.use_corpus and result.get("corpus_stats", {}).get("enabled"):
-            stats = result["corpus_stats"]
-            print(f"\n🔍 语料库统计:")
-            print(f"   - 总句子: {stats['total_sentences']}")
-            print(f"   - 命中: {stats['total_hits']}")
-            print(f"   - LLM翻译: {stats['total_misses']}")
-            print(f"   - 命中率: {stats['overall_hit_rate']*100:.1f}%")
+        # 运行 Agent
+        result_state = patent_agent.invoke(initial_state)
         
-        print(f"✅ 翻译完成\n")
-        return result
+        # 构建响应（兼容原有 TranslationResponse 结构）
+        return {
+            "translation":  result_state["final_translation"],
+            "term_dict":    result_state.get("term_dict", {}),
+            "chunks_info":  [
+                {"chunk_id": c["chunk_id"], "length": len(c["text"])}
+                for c in result_state.get("chunks", [])
+            ],
+            "statistics": {
+                "source_length":      len(request.src_text),
+                "translation_length": len(result_state["final_translation"]),
+                "num_chunks":         len(result_state.get("chunks", [])),
+                "terminology_consistent": result_state.get("validation_passed", False),
+                "retry_count":        result_state.get("retry_count", 0),
+            },
+            "corpus_stats": result_state.get("corpus_stats"),
+        }
         
     except Exception as e:
-        print(f"\n❌ 翻译失败: {str(e)}\n")
-        raise HTTPException(status_code=500, detail=f"翻译失败: {str(e)}")
+        print(f"\n❌ Agent 执行失败，尝试 Pipeline 降级: {str(e)}\n")
+        try: 
+            result = translator.translate_document(
+                src_text=request.src_text,
+                src_lang=request.src_lang,
+                tgt_lang=request.tgt_lang,
+                domain=request.domain,
+                use_context=request.use_context,
+                glossary=request.glossary,
+                domain_prompt=request.domain_prompt,
+                parallel=True,      
+                max_workers=3,
+                # 语料库参数
+                use_corpus=request.use_corpus,
+                corpus_threshold=request.corpus_threshold
+            )
+            return result
+        except Exception as e2:
+            raise HTTPException(status_code=500, detail=f"翻译失败: {str(e2)}")
 
 
 @app.post("/extract_terminology", response_model=TerminologyExtractionResponse)
