@@ -477,7 +477,7 @@ class DocumentTranslator:
         domain_prompt: str = None,
         parallel: bool = True,
         max_workers: int = 3,
-        # 🆕 语料库参数
+        # 语料库参数
         corpus_id: Optional[str] = None,
         use_corpus: bool = False,
         corpus_threshold: float = 0.85
