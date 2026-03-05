@@ -7,5 +7,6 @@ langgraph == 1.0.10
 openai == 2.24.0
 pydantic == 2.12.5
 qdrant_client == 1.17.0
+streamlit == 1.55.0
 uvicorn == 0.41.0
-fastembed == 0.7.4
+pdfplumber == 0.11.9

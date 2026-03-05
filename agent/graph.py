@@ -98,7 +98,7 @@ def run_pipeline_fallback(state: TranslationState) -> TranslationState:
         src_lang=state["src_lang"],
         tgt_lang=state["tgt_lang"],
         domain=state.get("domain", "技术"),
-        glossary=state.get("glossary"),
+        glossary = state.get("term_dict") or state.get("glossary"),
         domain_prompt=state.get("domain_prompt"),
         parallel=True,
         max_workers=3,

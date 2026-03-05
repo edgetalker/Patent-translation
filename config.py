@@ -68,7 +68,8 @@ class Config:
         "ko": "韩文",
         "de": "德文",
         "fr": "法文",
-        "es": "西班牙文"
+        "es": "西班牙文",
+        "ru": "俄文"
     }
     
     @classmethod

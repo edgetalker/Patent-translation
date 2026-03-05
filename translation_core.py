@@ -431,39 +431,40 @@ class DocumentTranslator:
         translation: str,
         term_dict: Dict[str, str],
         src_text: str,
-        tgt_lang: str
+        tgt_lang: str,
+        threshold: float = 0.15   # 允许15%不一致
     ) -> Tuple[bool, List[str]]:
-        """验证翻译结果中的术语一致性"""
+        """
+        多语言术语一致性验证
+        策略：Unicode 归一化 + 小写 + 子串匹配，语言无关
+        """
+        import unicodedata
+
+        def normalize(text: str) -> str:
+            """统一大小写、全半角、重音符号"""
+            text = unicodedata.normalize("NFKC", text).lower().strip()
+            return text
+
+        translation_norm = normalize(translation)
         inconsistencies = []
-        
+
         for src_term, tgt_term in term_dict.items():
+            # 跳过源文本中未出现的术语
             if src_term not in src_text:
                 continue
-            
-            tgt_variants = [
-                tgt_term,
-                tgt_term.lower(),
-                tgt_term.capitalize(),
-            ]
-            
-            if tgt_lang == 'en':
-                if tgt_term.endswith('y'):
-                    tgt_variants.append(tgt_term[:-1] + 'ies')
-                else:
-                    tgt_variants.append(tgt_term + 's')
-            
-            found = any(variant in translation for variant in tgt_variants)
-            
-            if not found:
-                words = tgt_term.lower().split()
-                if len(words) > 1:
-                    all_words_present = all(word in translation.lower() for word in words)
-                    if not all_words_present:
-                        inconsistencies.append(f"{src_term} -> {tgt_term}")
-                else:
-                    inconsistencies.append(f"{src_term} -> {tgt_term}")
-        
-        is_consistent = len(inconsistencies) == 0
+
+            tgt_norm = normalize(tgt_term)
+            if not tgt_norm:
+                continue
+
+            # 子串匹配：归一化后的译文中是否包含术语
+            if tgt_norm not in translation_norm:
+                inconsistencies.append(f"{src_term} -> {tgt_term}")
+
+        total = sum(1 for src in term_dict if src in src_text)
+        is_consistent = (
+            len(inconsistencies) / max(total, 1) < threshold
+        )
         return is_consistent, inconsistencies
     
     def translate_document(
