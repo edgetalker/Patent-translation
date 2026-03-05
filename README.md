@@ -1,22 +1,19 @@
 # Patent Translation Agent | 专利文档翻译智能体
 
-> 面向知识产权垂直领域的长文档翻译系统。
-> 通过**滑动窗口术语定位 + 外部术语库注入 + 并行分块翻译**，
-> 在使用外部术语库的前提下保证全文术语 100% 一致性，
-> 实现 8K 字符文档约 6 分钟内处理完成（无语料库基准）。
-> 
-> 系统采用 LangGraph Agent 架构，将术语提取、并行翻译、一致性验证封装为独立 Tool，通过 Orchestrator 实现完整 Tool-Use 闭环；Pipeline 层作为降级容错保障，异常路径下自动切换。
+> 面向知识产权垂直领域的长文档翻译系统，基于 **LangGraph Agent** 架构实现术语提取、并行翻译、一致性验证的完整 Tool-Use 闭环。
+> 外部术语库注入保证全文术语 **100% 一致性**，8K 字符文档 **6 分钟**内处理完成；Pipeline 层作为降级容错保障，异常路径下自动切换，确保系统在任意故障模式下稳定输出。
 
 ![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://patent-translation-m5m8cgguvtk8fzw6gkeu2q.streamlit.app)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Agent-purple.svg)
 ![Qdrant](https://img.shields.io/badge/Qdrant-Vector_DB-DC143C)
 ![vLLM](https://img.shields.io/badge/vLLM-Inference-orange)
 ![Status](https://img.shields.io/badge/status-active-success.svg)
 ![License](https://img.shields.io/badge/license-MIT-yellow.svg)
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://patent-translation-m5m8cgguvtk8fzw6gkeu2q.streamlit.app)
 
-##  项目结构
+
+## 📁 项目结构
 
 ```
 patent-translation/
@@ -37,7 +34,7 @@ patent-translation/
 ├── .env.example               # 环境变量模板
 └── requirements.txt
 ```
-## 系统架构
+## 🏗️ 系统架构
 ```
 输入：文档 + 目标语言 [+ 术语表]
          │
@@ -66,7 +63,7 @@ patent-translation/
                     └─────────────────────┘
 ```
 
-## 核心模块功能
+## ⚙️ 核心模块功能
 
 | 模块 | 说明 |
 |------|------|
@@ -78,7 +75,7 @@ patent-translation/
 | **RAG 语料库加速** | 命中句子（阈值 0.85）直接复用历史译文，未命中送 LLM，减少重复 API 调用 |
 
 
-## 翻译引擎
+## 🔧 翻译引擎
 
 兼容 OpenAI 格式 API，支持多种部署方式：
 
@@ -101,7 +98,8 @@ patent-translation/
 
 ## 🚀 Quick Start
 
-**环境要求**：Python 3.9+ | Qdrant | vLLM 兼容推理服务
+**环境要求**：Python 3.9+ | OpenAI 兼容 API（vLLM / DeepSeek 等）
+**可选**：Qdrant（启用 RAG 语料库加速时需要）
 ```bash
 # 1. 克隆仓库
 git clone https://github.com/edgetalker/Patent-translation.git
@@ -163,7 +161,7 @@ curl http://localhost:8080/health
 - [ ] Dify 插件封装：将翻译模块发布至 Dify 插件生态，实现零配置即插即用
 - [ ] MoE 微调：基于专利领域数据进行监督微调
 
-## 完整 API 文档
+## 📖 完整 API 文档
 
 启动服务后访问 `http://localhost:8080/docs` 查看交互式文档
 
