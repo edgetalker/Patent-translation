@@ -8,7 +8,6 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Agent-purple.svg)
 ![Qdrant](https://img.shields.io/badge/Qdrant-Vector_DB-DC143C)
-![vLLM](https://img.shields.io/badge/vLLM-Inference-orange)
 ![Status](https://img.shields.io/badge/status-active-success.svg)
 ![License](https://img.shields.io/badge/license-MIT-yellow.svg)
 
