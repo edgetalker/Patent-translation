@@ -14,6 +14,7 @@
 ![vLLM](https://img.shields.io/badge/vLLM-Inference-orange)
 ![Status](https://img.shields.io/badge/status-active-success.svg)
 ![License](https://img.shields.io/badge/license-MIT-yellow.svg)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://patent-translation-m5m8cgguvtk8fzw6gkeu2q.streamlit.app)
 
 ##  项目结构
 
@@ -90,6 +91,14 @@ patent-translation/
 > 项目实际经历了云服务器自部署 → DeepSeek API → 本地部署的演进，
 > 驱动因素依次是：初期隐私优先、中期成本压力、长期推荐本地部署兼顾三者。
 
+## 🎯 在线 Demo
+
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://patent-translation-m5m8cgguvtk8fzw6gkeu2q.streamlit.app)
+
+> 提供三个预置专利片段（`中-英` 技术文档 / `韩-中` 医学文档 / `西-英` 技术文档），点击示例按钮即可一键运行，无需配置。
+
+![Demo Screenshot](./docs/stream_demo.png)
+
 ## 🚀 Quick Start
 
 **环境要求**：Python 3.9+ | Qdrant | vLLM 兼容推理服务
@@ -147,10 +156,12 @@ curl http://localhost:8080/health
 - [x] FastAPI 7 模块 RESTful 服务
 - [x] Agent 化重构：Pipeline 各阶段封装为独立 Tool（LangGraph）
 - [x] Orchestrator 层：动态路由、重试机制、Pipeline 降级容错
+- [x] Streamlit 在线 Demo（支持文件上传 / 预置示例 / 自定义术语表）
 
 **计划中**
+- [ ] 语料库数据完善：持续收集专利双语语料，完善 RAG 加速链路实测数据
+- [ ] Dify 插件封装：将翻译模块发布至 Dify 插件生态，实现零配置即插即用
 - [ ] MoE 微调：基于专利领域数据进行监督微调
-- [ ] 前端界面：Vue 3 + Element Plus 可视化操作
 
 ## 完整 API 文档
 
