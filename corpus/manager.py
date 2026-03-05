@@ -18,8 +18,8 @@ class CorpusManager:
     
     def __init__(
         self,
-        qdrant_host: str = "localhost",
-        qdrant_port: int = 6333,
+        qdrant_url: str = "localhost:6333",
+        qdrant_api_key: Optional[str] = None,
         embedding_service: Optional[EmbeddingService] = None,
         collection_name: str = "patent_corpus"
     ):
@@ -32,7 +32,10 @@ class CorpusManager:
             embedding_service: Embedding 服务实例
             collection_name: Collection 名称
         """
-        self.client = QdrantClient(host=qdrant_host, port=qdrant_port)
+        if qdrant_api_key:
+            self.client = QdrantClient(url=qdrant_url,api_key=qdrant_api_key)
+        else:
+            self.client = QdrantClient(url=qdrant_url)
         self.embedding_service = embedding_service
         self.collection_name = collection_name
         
@@ -48,11 +51,11 @@ class CorpusManager:
             self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(
-                    size=1024,  # 根据你的 embedding 模型调整
+                    size=1024,
                     distance=Distance.COSINE
                 )
             )
-            print(f"✅ 创建 collection: {self.collection_name}")
+            print(f"创建 collection: {self.collection_name}")
     
     async def add_corpus_entries(
         self,
@@ -324,6 +327,7 @@ class CorpusManager:
         try:
             collection_info = self.client.get_collection(self.collection_name)
             return {
+                "collection_name": self.collection_name,
                 "total_entries": collection_info.points_count,
                 "vector_size": collection_info.config.params.vectors.size
             }

@@ -27,8 +27,9 @@ app = FastAPI(
 # 初始化语料库相关组件
 embedding_service = EmbeddingService()
 corpus_manager = CorpusManager(
-    qdrant_host=config.QDRANT_HOST,
-    qdrant_port=config.QDRANT_PORT,
+    qdrant_url=config.QDRANT_URL,
+    qdrant_api_key=config.QDRANT_API_KEY,
+    collection_name=config.QDRANT_COLLECTION_NAME,
     embedding_service=embedding_service
 )
 
@@ -141,8 +142,7 @@ async def get_config():
             "min_frequency": config.MIN_TERM_FREQUENCY
         },
         "corpus": {  
-            "qdrant_host": config.QDRANT_HOST,
-            "qdrant_port": config.QDRANT_PORT,
+            "qdrant_url": config.QDRANT_URL,
             "collection_name": config.QDRANT_COLLECTION_NAME,
             "enabled": True
         }
@@ -395,7 +395,7 @@ if __name__ == "__main__":
     print(f"监听地址: {config.API_HOST}:{config.API_PORT}")
     print(f"LLM服务: {config.LLM_BASE_URL}")
     print(f"模型: {config.LLM_MODEL_NAME}")
-    print(f"语料库: Qdrant @ {config.QDRANT_HOST}:{config.QDRANT_PORT}\n")
+    print(f"语料库: Qdrant @ {config.QDRANT_URL}\n")
     
     uvicorn.run(
         app,

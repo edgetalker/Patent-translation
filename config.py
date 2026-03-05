@@ -42,9 +42,10 @@ class Config:
     MAX_INJECT_TERMS = int(os.getenv("MAX_INJECT_TERMS", 25))    
 
     # ==================== Qdrant配置 ==================
-    QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
-    QDRANT_PORT: int = int(os.getenv("QDRANT_PORT", "6333"))
-    QDRANT_COLLECTION_NAME: str = "patent_translations"          
+    QDRANT_URL: str = os.getenv("QDRANT_URL", "localhost:6333")
+    QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY")
+    QDRANT_COLLECTION_NAME: str = "items"  # patent_corpus   
+          
 
     # ==================== 性能配置 ====================
     MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
