@@ -21,7 +21,8 @@ class Config:
     LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "qwen2.5-14b")
 
     # ==================== Embedding服务配置 ==================
-    EMBED_BASE_URL = os.getenv("EMBED_BASE_URL", "http://103.234.21.156:11001/api")
+    EMBED_BASE_URL = os.getenv("EMBED_BASE_URL")
+    EMBED_API_KEY = os.getenv("EMBED_API_KEY")
     VECTOR_SIZE = int(os.getenv("VECTOR_SIZE", "1024"))
     
     # ==================== 模型上下文配置 ====================
@@ -43,8 +44,8 @@ class Config:
 
     # ==================== Qdrant配置 ==================
     QDRANT_URL: str = os.getenv("QDRANT_URL", "localhost:6333")
-    QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY")
-    QDRANT_COLLECTION_NAME: str = "items"  # patent_corpus   
+    QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY","")
+    QDRANT_COLLECTION_NAME: str = "patent_corpus"
           
 
     # ==================== 性能配置 ====================

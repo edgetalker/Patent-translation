@@ -9,7 +9,7 @@ from qdrant_client.models import (
     Distance, VectorParams, PointStruct,
     Filter, FieldCondition, MatchValue, 
 )
-
+from config import config
 from corpus.embeddings import EmbeddingService
 
 
@@ -51,7 +51,7 @@ class CorpusManager:
             self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(
-                    size=1024,
+                    size=config.VECTOR_SIZE,
                     distance=Distance.COSINE
                 )
             )
@@ -80,10 +80,7 @@ class CorpusManager:
         
         # 批量获取 embeddings
         try:
-            embeddings = await self.embedding_service.get_embeddings(
-                texts=source_texts,
-                is_query=False
-            )
+            embeddings = await self.embedding_service.get_embeddings(texts=source_texts)
         except Exception as e:
             return {"success": False, "error": f"Failed to get embeddings: {str(e)}"}
         
