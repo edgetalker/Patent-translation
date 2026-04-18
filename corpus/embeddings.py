@@ -26,9 +26,11 @@ class EmbeddingService:
             self.base_url = base_url
             self.api_key = None
 
-        self.service_type = None  # 'openai' 或 'private'
+        self.service_type = None 
         self.model = None
         self.embeddings_url = None
+
+        self.client = httpx.AsyncClient(timeout=60.0)
 
         # 解析embedding模型
         self._parse_model()    
@@ -37,6 +39,7 @@ class EmbeddingService:
         self, 
         texts: Union[str, List[str]], 
         model: str | None = None,
+        is_query: bool = False, 
     ) -> List[List[float]]:
         """
         获取文本的embedding向量
@@ -70,7 +73,7 @@ class EmbeddingService:
             except Exception as e:
                 raise Exception(f"API调用失败: {str(e)}")
         else:
-            self.get_local_embeddings(texts)
+            return await self._get_local_embeddings(texts, is_query=is_query)
         
     async def _get_local_embeddings(
         self, 
@@ -163,5 +166,5 @@ class EmbeddingService:
         else:
             # 默认为私有服务
             self.service_type = 'private'
-            self.model = 'default-model'
+            self.model = 'Qwen3-Embedding-0.6B'
             self.embeddings_url = self.base_url
