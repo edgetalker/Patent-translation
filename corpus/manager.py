@@ -1,6 +1,7 @@
 """
 语料库管理模块
 负责 Qdrant 向量数据库的 CRUD 操作
+支持批量检索
 """
 import asyncio
 from typing import List, Dict, Optional
@@ -33,9 +34,9 @@ class CorpusManager:
             collection_name: Collection 名称
         """
         if qdrant_api_key:
-            self.client = QdrantClient(url=qdrant_url,api_key=qdrant_api_key)
+            self.client = QdrantClient(url=qdrant_url,api_key=qdrant_api_key,timeout=60)
         else:
-            self.client = QdrantClient(url=qdrant_url)
+            self.client = QdrantClient(url=qdrant_url,timeout=60)
         self.embedding_service = embedding_service
         self.collection_name = collection_name
         
@@ -56,7 +57,16 @@ class CorpusManager:
                 )
             )
             print(f"创建 collection: {self.collection_name}")
-    
+        
+        try:
+            self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="corpus_id",
+                field_schema="keyword"
+            )
+        except Exception:
+            pass  # 已存在则忽略
+        
     async def add_corpus_entries(
         self,
         entries: List[Dict],

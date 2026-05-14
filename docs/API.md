@@ -1,4 +1,4 @@
-# API 接口文档 v1.0
+# API 接口文档 v2.0
 ## 健康检查
 `GET /health` - 检查服务运行状态
 
@@ -118,10 +118,10 @@ curl "http://localhost:8080/extract_terminology" \
 | `src_lang`         | str     | 源语言             | 例：zh   |
 | `tgt_lang`         | str     | 目标语言           | 例：en   |
 | `domain`           | str     | 文档领域           | 技术 |
-| `use_context`      | boolean | 上下文重叠         | True     |
 | `glossary`         | dict    | 术语表             | 非必填   |
 | `domain_prompt`    | str     | 领域提示词        | 非必填  |
 | `use_corpus`       | boolean | 是否启用语料库加速 | False   |
+| `corpus_id`        | str     | corpus_id       | 非必填   |
 | `corpus_threshold` | float   | 语料库匹配阈值     | 0.85   |
 
 **请求示例** 
@@ -156,57 +156,60 @@ curl "http://localhost:8080/translate" \
 + 使用`语料库`加速
 
 ```bash
-curl "http://localhost:8080/translate" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "src_text": "本发明涉及一种图像处理方法...",
-      "src_lang": "zh",
-      "tgt_lang": "en",
-      "domain": "技术",
-      "use_corpus": true,
-      "corpus_threshold": 0.85
-    }'
+curl -X POST http://localhost:8080/translate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "src_text": "本发明涉及一组治疗某些微生物和真菌感染的化合物。",
+    "src_lang": "zh",
+    "tgt_lang": "en",
+    "domain": "医学",
+    "glossary": {"化合物": "compound", "微生物": "microorganism"},
+    "use_corpus": true,
+    "corpus_id": "thesis_demo",
+    "corpus_threshold": 0.75
+  }'
 ```
 
 **响应示例**
 
 ```json
 {
-  "translation": "The present invention relates to an image recognition method based on deep learning...",
+  "translation": "The present invention relates to a group of compounds which are useful in the treatment of certain microbial and fungal infections.",
   "term_dict": {
-    "深度学习": "deep learning",
-    "图像识别": "image recognition",
-    "卷积神经网络": "convolutional neural network"
+    "化合物": "compound",
+    "微生物": "microorganism"
   },
   "chunks_info": [
     {
       "chunk_id": 0,
-      "length": 5922
+      "length": 24
     },
-    {
-      "chunk_id": 1,
-      "length": 2586
-    }
   ],
   "statistics": {
-    "source_length": 8469,
-    "translation_length": 26694,
-    "num_chunks": 2,
-    "num_terms_extracted": 52,
-    "num_terms_translated": 52,
-    "terminology_consistent": true,
-    "num_inconsistencies": 0,
-    "time_elapsed": 350.87,
-    "avg_time_per_chunk": 175.44,
-    "glossary_provided": false,
-    "parallel_enabled": true
+    "source_length": 24,
+    "translation_length": 131,
+    "num_chunks": 1,
+    "terminology_consistency_rate": 0.5,
+    "terminology_hit": 1,
+    "terminology_total": 2
   },
-  "corpus_stats": {
-    "enabled": false,
-    "total_sentences": 0,
-    "total_hits": 0,
+  "terminology_stats": {
+    "terminology_total": 2,
+    "terminology_hit": 1,
+    "terminology_miss": 1,
+    "consistency_rate": 0.5,
+    "inconsistencies": [
+      "微生物 -> microorganism"
+    ]
+  },
+  "retrieval_stats": {
+    "total_sentences": 1,
+    "total_hits": 1,
     "total_misses": 0,
-    "overall_hit_rate": 0.0
+    "hit_rate": 1,
+    "embedding_api_calls": 1,
+    "success": true,
+    "error_message": null
   }
 }
 ```

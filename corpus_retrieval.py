@@ -18,8 +18,7 @@ class SentenceMatch:
     matched: bool           # 是否命中语料库
     translation: str        # 译文（命中时有值，未命中为空）
     similarity: float       # 相似度分数（0.0-1.0）
-    corpus_source: str      # 命中的语料库原文（用于调试）
-
+    corpus_source: str      # 命中的语料库原文
 
 @dataclass
 class RetrievalResult:
@@ -42,18 +41,18 @@ class RetrievalResult:
             if not sent.matched
         ]
     
-    def get_matched_translations(self) -> Dict[int, str]:
+    def get_few_shots(self) -> List[Tuple[str, str, float]]:
         """
-        获取已命中句子的翻译
+        获取所有命中句的 (原文, 译文, 相似度) 三元组,供 Few-Shot Prompt 注入
         
         Returns:
-            {index: translation}
+            [(matched_source, translation, similarity), ...]
         """
-        return {
-            sent.index: sent.translation
+        return [
+            (sent.corpus_source, sent.translation, sent.similarity)
             for sent in self.sentences
             if sent.matched
-        }
+        ]
 
 
 # ==================== 语言配置 ====================
@@ -70,41 +69,10 @@ class LanguageConfig:
         'fr': ['. ', '! ', '? ', '; '],     # 法语
     }
     
-    # 固定句式模式（用于提高阈值）
-    FIXED_PATTERNS = {
-        'zh': [
-            r'^本发明涉及',
-            r'^所述\w+包括',
-            r'^根据本发明',
-            r'^如图\d+',
-            r'^与现有技术相比',
-            r'^具体实施方式',
-            r'^在.*实施例中',
-        ],
-        'en': [
-            r'^The present invention relates to',
-            r'^The \w+ comprises',
-            r'^According to the present invention',
-            r'^As shown in (FIG\.|Figure)',
-            r'^Compared with the prior art',
-            r'^In an embodiment',
-        ],
-        'ja': [
-            r'^本発明は',
-            r'^前記\w+は',
-            r'^図\d+に示す',
-        ]
-    }
-    
     @classmethod
     def get_delimiters(cls, lang: str) -> List[str]:
         """获取语言的分句符"""
         return cls.SENTENCE_DELIMITERS.get(lang, cls.SENTENCE_DELIMITERS['en'])
-    
-    @classmethod
-    def get_fixed_patterns(cls, lang: str) -> List[str]:
-        """获取固定句式模式"""
-        return cls.FIXED_PATTERNS.get(lang, [])
 
 
 # ==================== 分句器 ====================
@@ -218,7 +186,6 @@ class CorpusRetriever:
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
         self.splitter = SentenceSplitter(lang=src_lang)
-        self.fixed_patterns = LanguageConfig.get_fixed_patterns(src_lang)
     
     async def retrieve_for_chunk(
         self,
@@ -363,65 +330,6 @@ class CorpusRetriever:
                 )
         
         return sentence_matches
-    
-    def _get_adaptive_threshold(self, sentence: str, base_threshold: float) -> float:
-        """
-        自适应阈值：固定句式使用更高阈值
-        
-        Args:
-            sentence: 源句子
-            base_threshold: 基础阈值
-        
-        Returns:
-            调整后的阈值
-        """
-        # 检查是否为固定句式
-        for pattern in self.fixed_patterns:
-            if re.match(pattern, sentence):
-                # 固定句式，提高阈值到 0.90+
-                return max(base_threshold, 0.90)
-        
-        # 普通句子，使用基础阈值
-        return base_threshold
-    
-    def merge_translation(
-        self,
-        retrieval_result: RetrievalResult,
-        llm_translations: Dict[int, str]
-    ) -> str:
-        """
-        合并检索结果和LLM翻译
-        
-        Args:
-            retrieval_result: 检索结果
-            llm_translations: {句子索引: LLM翻译}
-        
-        Returns:
-            完整翻译文本
-        """
-        merged_sentences = []
-        
-        for sent_match in retrieval_result.sentences:
-            if sent_match.matched:
-                # 使用语料库翻译
-                merged_sentences.append(sent_match.translation)
-            else:
-                # 使用LLM翻译
-                if sent_match.index in llm_translations:
-                    merged_sentences.append(llm_translations[sent_match.index])
-                else:
-                    # 未提供翻译，保留原文（错误情况）
-                    print(f"⚠️  警告: 句子{sent_match.index}既未命中也未翻译")
-                    merged_sentences.append(sent_match.source)
-        
-        # 拼接句子
-        # 根据目标语言决定分隔符
-        if self.tgt_lang == 'zh':
-            # 中文不需要额外空格
-            return "".join(merged_sentences)
-        else:
-            # 英文等语言，句子间加空格
-            return " ".join(merged_sentences)
     
     def get_statistics(self, retrieval_result: RetrievalResult) -> Dict:
         """

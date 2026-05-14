@@ -76,30 +76,57 @@ class EmbeddingService:
             return await self._get_local_embeddings(texts, is_query=is_query)
         
     async def _get_local_embeddings(
-        self, 
-        texts: Union[str, List[str]], 
+        self,
+        texts: Union[str, List[str]],
         is_query: bool = False
     ) -> List[List[float]]:
-        """
-        私有服务端口调用
+        """私有服务端口调用 (含分批/节流/重试)"""
+        import asyncio
         
-        Args:
-            texts: 单个文本或文本列表
-            is_query: 是否为查询模式
+        if not texts:
+            return []
         
-        Returns:
-        {
-            "embeddings": embedding向量列表
-            "model": embedding 模型
-            "success": 响应标识
-        }            
-        """        
+        # ─── 自动分批 + 节流 + 重试 ─────────────────────────
+        BATCH_SIZE = 32
+        INTER_BATCH_SLEEP = 0.3   # 每个 sub-batch 间隔
+        MAX_RETRIES = 3
+        
+        if len(texts) > BATCH_SIZE:
+            n_batches = (len(texts) + BATCH_SIZE - 1) // BATCH_SIZE
+            print(f"[embed] 批量 {len(texts)} 条 > {BATCH_SIZE},分 {n_batches} 批 (节流 {INTER_BATCH_SLEEP}s)")
+            
+            all_embeddings = []
+            for i in range(0, len(texts), BATCH_SIZE):
+                batch = texts[i : i + BATCH_SIZE]
+                
+                # 重试逻辑
+                last_err = None
+                for attempt in range(MAX_RETRIES):
+                    try:
+                        sub = await self._get_local_embeddings(batch, is_query=is_query)
+                        all_embeddings.extend(sub)
+                        last_err = None
+                        break
+                    except Exception as e:
+                        last_err = e
+                        if attempt < MAX_RETRIES - 1:
+                            wait = 1.5 ** attempt   # 1.0s, 1.5s
+                            print(f"[embed] batch {i//BATCH_SIZE+1}/{n_batches} 第 {attempt+1} 次失败 ({type(e).__name__}),{wait:.1f}s 后重试")
+                            await asyncio.sleep(wait)
+                
+                if last_err is not None:
+                    print(f"[embed] ❌ batch {i//BATCH_SIZE+1}/{n_batches} 重试 {MAX_RETRIES} 次后仍失败")
+                    raise last_err
+                
+                # 节流
+                await asyncio.sleep(INTER_BATCH_SLEEP)
+            
+            return all_embeddings
+        # ──────────────────────────────────────────────────
+        
+        # 单批走原逻辑
         url = f"{self.base_url}/embeddings"
-        
-        payload = {
-            "texts": texts,
-            "is_query": is_query
-        }
+        payload = {"texts": texts, "is_query": is_query}
         
         try:
             response = await self.client.post(url, json=payload)
@@ -108,32 +135,26 @@ class EmbeddingService:
             
             if not data.get("success"):
                 error_msg = data.get("error", "Unknown error")
-                raise Exception(f"Embedding service error: {error_msg}")
+                print(f"⚠️ 服务端软失败 raw response: {data}")
+                raise Exception(f"Embedding service error: {error_msg} | raw={data}")
             
             embeddings = data["embeddings"]
-            
-            # 确保返回列表格式
             if embeddings and not isinstance(embeddings[0], list):
                 embeddings = [embeddings]
-            
             return embeddings
-            
+        
         except httpx.HTTPStatusError as e:
-            # 🔑 增强：HTTP错误处理
             error_detail = e.response.text[:200] if e.response.text else "No details"
             raise Exception(f"HTTP {e.response.status_code}: {error_detail}")
-        
         except httpx.RequestError as e:
-            # 🔑 增强：网络错误处理
             raise Exception(f"Network error: {type(e).__name__}: {str(e)}")
-        
         except KeyError as e:
-            # 🔑 增强：响应解析错误
             raise Exception(f"Response parsing error, missing key: {e}")
-        
         except Exception as e:
-            # 🔑 增强：其他错误
-            raise Exception(f"Failed to get embeddings: {type(e).__name__}: {str(e)}")
+            # 透传 Embedding service error,不再二次包装
+            if "Embedding service error" in str(e):
+                raise
+            raise Exception(f"Failed to get embeddings: {type(e).__name__}: {repr(e)}")
         
     def _parse_model(self):
         """
