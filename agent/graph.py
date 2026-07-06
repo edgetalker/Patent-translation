@@ -27,7 +27,10 @@ from agent.tools import (
 
 def run_chunk(state: TranslationState) -> dict:
     """节点 1:分块"""
-    result = chunk_tool.invoke({"src_text": state["src_text"]})
+    result = chunk_tool.invoke({
+        "src_text": state["src_text"],
+        "context_budget": state.get("context_budget"),
+    })
     return {"chunks": result["chunks"]}
 
 
@@ -64,6 +67,7 @@ def run_parallel_trans(state: TranslationState) -> dict:
         "tgt_lang":             state["tgt_lang"],
         "domain":               state["domain"],
         "domain_prompt":        state.get("domain_prompt"),
+        "context_budget":       state.get("context_budget"),
     })
     return {"translated_chunks": result["translated_chunks"]}
 

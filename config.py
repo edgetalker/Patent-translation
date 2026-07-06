@@ -48,6 +48,12 @@ class Config:
     QDRANT_COLLECTION_NAME: str = "patent_corpus"
           
 
+    # ==================== Agent 行为配置 ==================
+    DEFAULT_MAX_ITERATIONS = int(os.getenv("DEFAULT_MAX_ITERATIONS", "2"))
+    DEFAULT_CONSISTENCY_THRESHOLD = float(os.getenv("DEFAULT_CONSISTENCY_THRESHOLD", "0.85"))
+    MAX_DYNAMIC_FEW_SHOTS = int(os.getenv("MAX_DYNAMIC_FEW_SHOTS", "5"))
+    DYNAMIC_SAFE_MARGIN = float(os.getenv("DYNAMIC_SAFE_MARGIN", "0.85"))
+
     # ==================== 性能配置 ====================
     MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
     RETRY_DELAY = int(os.getenv("RETRY_DELAY", "2"))

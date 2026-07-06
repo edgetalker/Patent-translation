@@ -171,18 +171,19 @@ class DocumentTranslator:
         domain_prompt: Optional[str] = None,
         few_shots: Optional[List[Tuple[str, str, float]]] = None,
         max_few_shots: int = 5,
+        context_budget: Optional[Dict] = None,
     ) -> str:
         """
         翻译单个文本块(纯翻译函数)
-        
+
         不感知 RAG 检索的存在——few_shots 由上游 retrieve_tool 预先准备好后传入。
         few_shots 为 None 或空列表时,自动退化为零参考翻译。
-        
+
         流程:
         1. 术语表过滤(chunk 内相关术语)
         2. 构造 Few-Shot Prompt
         3. 单次 LLM 调用翻译整个 chunk
-        
+
         Args:
             chunk_text: 待翻译文本块
             chunk_id: 当前 chunk 序号(从 0 开始)
@@ -192,19 +193,25 @@ class DocumentTranslator:
             domain_prompt: 领域级额外指令
             few_shots: 预检索好的 Few-Shot 参考 [(corpus_src, corpus_tgt, sim), ...]
             max_few_shots: Top-K 截断数量
-        
+            context_budget: 动态上下文预算,覆盖 max_inject_terms / max_few_shots
+
         Returns:
             译文字符串(失败时返回 "[TRANSLATION FAILED: ...]" 占位)
         """
         chunk_start = time.time()
-        
+
+        # 动态上下文预算
+        budget = context_budget or {}
+        max_inject_terms = budget.get("max_inject_terms", config.MAX_INJECT_TERMS)
+        effective_max_few_shots = budget.get("max_few_shots", max_few_shots)
+
         # ---------- Step 1: 术语表过滤 ----------
         relevant_terms = None
         if term_dict:
             relevant_terms = self._get_relevant_terms(
                 chunk_text=chunk_text,
                 term_dict=term_dict,
-                max_inject=config.MAX_INJECT_TERMS
+                max_inject=max_inject_terms
             )
         
         # ---------- Step 2: 构造 Prompt ----------
@@ -218,7 +225,7 @@ class DocumentTranslator:
             domain_prompt=domain_prompt,
             chunk_id=chunk_id,
             total_chunks=total_chunks,
-            max_few_shots=max_few_shots,
+            max_few_shots=effective_max_few_shots,
         )
         prompt_time = time.time() - chunk_start
         

@@ -19,12 +19,25 @@ class TranslationState(TypedDict):
     corpus_id: Optional[str]
     corpus_threshold: float
 
-    # ── 节点产出 ────────────────────────────────────
+    # ── Agent 控制参数 ──────────────────────────────
+    max_iterations: int                       # 自纠错最大迭代次数
+    consistency_threshold: float              # 术语一致性阈值
+    thread_id: Optional[str]                  # 跨调用记忆线程 ID
+    use_memory: bool                          # 是否启用术语记忆
+    context_budget: Optional[Dict]            # 动态上下文预算
+
+    # ── 节点产出 / 循环状态 ───────────────────────────
     chunks: List[Dict]                        # chunk_tool 输出
     term_dict: Dict[str, str]                 # term_extract_tool 输出
     retrieval_results: Dict                   # retrieve_tool 输出 (含 enabled/per_chunk/stats)
     translated_chunks: List[str]              # parallel_trans_tool 输出
+    failed_chunks: List[int]                  # parallel_trans_tool 输出的失败 chunk_id
     terminology_stats: Dict                   # stats_tool 输出
+    terminology_memory: Dict[str, str]        # 跨调用术语记忆
+    iteration_count: int                      # 当前自纠错迭代次数
+    feedback_prompt: Optional[str]            # 自纠错反馈提示
 
     # ── 最终结果 ────────────────────────────────────
     final_translation: str
+    translation: str                          # Streamlit 兼容别名
+    statistics: Optional[Dict]                # Streamlit 兼容别名

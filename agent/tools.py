@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 from terminology_extraction import TerminologyExtractor
 from translation_core import DocumentTranslator
 from retrieval_service import RetrievalService, BatchRetrievalResult
-from utils import split_text_by_paragraph
+from utils import split_text_by_paragraph, calculate_context_budget
 from config import config
 
 # 全局单例
@@ -61,19 +61,26 @@ def init_tools(corpus_manager=None, src_lang: str = "zh", tgt_lang: str = "en"):
 
 
 @tool
-def chunk_tool(src_text: str) -> Dict:
+def chunk_tool(src_text: str, context_budget: Optional[Dict] = None) -> Dict:
     """
     【分块工具】
     将长文本按段落切分成 chunk,作为后续所有处理的基本单位。
-    
+    支持通过 context_budget 动态调整最大 chunk 字符数。
+
     Returns:
         {
             "chunks": List[Dict],  # [{"text": str, "chunk_id": int, "start_pos": int}, ...]
             "total_chunks": int
         }
     """
-    chunks = split_text_by_paragraph(src_text, config.MAX_CHUNK_LENGTH)
-    print(f"[chunk_tool] 文档分为 {len(chunks)} 个 chunk")
+    max_length = config.MAX_CHUNK_LENGTH
+    if context_budget:
+        dynamic_max = context_budget.get("max_chunk_chars")
+        if dynamic_max:
+            max_length = max(dynamic_max, config.MIN_CHUNK_LENGTH)
+
+    chunks = split_text_by_paragraph(src_text, max_length)
+    print(f"[chunk_tool] 文档分为 {len(chunks)} 个 chunk (max_length={max_length})")
     return {
         "chunks": chunks,
         "total_chunks": len(chunks),
@@ -257,19 +264,22 @@ def parallel_trans_tool(
     domain_prompt: Optional[str] = None,
     max_workers: int = 3,
     max_few_shots: int = 5,
+    context_budget: Optional[Dict] = None,
 ) -> Dict:
     """
     【并行翻译工具】
     消费预检索结果,并发翻译所有 chunks。
     每个 worker 使用对应 chunk 的 few_shots,内部不再触发检索。
-    
+    支持通过 context_budget 动态调整术语注入和 few-shot 数量。
+
     Args:
         chunks: 分块列表
         retrieval_per_chunk: retrieve_tool 输出的 per_chunk 字段
         term_dict: 术语表(全文级,translate_chunk 内部会再做 chunk 级过滤)
         max_workers: 并发数
-        max_few_shots: Top-K 截断
-    
+        max_few_shots: Top-K 截断(可被 context_budget 覆盖)
+        context_budget: 动态上下文预算
+
     Returns:
         {
             "translated_chunks": List[str],  # 按 chunk_id 顺序
@@ -278,21 +288,35 @@ def parallel_trans_tool(
         }
     """
     translator = get_translator()
-    
+
     # 建立 chunk_id → few_shots 映射,保证对齐
     few_shots_map = {
         item["chunk_id"]: item["few_shots"]
         for item in retrieval_per_chunk
     }
-    
+
     translations: List[Optional[str]] = [None] * len(chunks)
     failed_chunks: List[int] = []
-    
+
     def translate_task(idx: int) -> tuple:
         chunk = chunks[idx]
         cid = chunk["chunk_id"]
         few_shots = few_shots_map.get(cid, [])
-        
+
+        # 按当前 chunk 的实际文本计算动态预算
+        per_chunk_budget = None
+        if context_budget is None:
+            per_chunk_budget = calculate_context_budget(
+                chunk_text=chunk["text"],
+                system_overhead=config.SYSTEM_PROMPT_OVERHEAD,
+                term_dict=term_dict,
+                model_context_window=config.MODEL_CONTEXT_WINDOW,
+                max_output_tokens=config.MAX_TOKENS,
+                safe_margin=config.SAFE_MARGIN,
+            )
+        else:
+            per_chunk_budget = dict(context_budget)
+
         try:
             translation = translator.translate_chunk(
                 chunk_text=chunk["text"],
@@ -305,11 +329,12 @@ def parallel_trans_tool(
                 domain_prompt=domain_prompt,
                 few_shots=few_shots,
                 max_few_shots=max_few_shots,
+                context_budget=per_chunk_budget,
             )
             return idx, translation, None
         except Exception as e:
             return idx, f"[TRANSLATION FAILED: chunk {cid}]", str(e)
-    
+
     # 并发执行
     start = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -322,10 +347,10 @@ def parallel_trans_tool(
                 print(f"[parallel_trans_tool] chunk {idx} 失败: {err}")
             else:
                 print(f"[parallel_trans_tool] 完成 chunk {idx+1}/{len(chunks)}")
-    
+
     elapsed = time.time() - start
     print(f"[parallel_trans_tool] 总翻译耗时: {elapsed:.2f}s")
-    
+
     return {
         "translated_chunks": translations,
         "translation_time": elapsed,
