@@ -262,6 +262,7 @@ def parallel_trans_tool(
     tgt_lang: str,
     domain: str,
     domain_prompt: Optional[str] = None,
+    feedback_prompt: Optional[str] = None,
     max_workers: int = 3,
     max_few_shots: int = 5,
     context_budget: Optional[Dict] = None,
@@ -271,11 +272,14 @@ def parallel_trans_tool(
     消费预检索结果,并发翻译所有 chunks。
     每个 worker 使用对应 chunk 的 few_shots,内部不再触发检索。
     支持通过 context_budget 动态调整术语注入和 few-shot 数量。
+    支持 feedback_prompt 自纠错反馈。
 
     Args:
         chunks: 分块列表
         retrieval_per_chunk: retrieve_tool 输出的 per_chunk 字段
         term_dict: 术语表(全文级,translate_chunk 内部会再做 chunk 级过滤)
+        domain_prompt: 领域级额外指令
+        feedback_prompt: 自纠错反馈提示(追加到 domain_prompt)
         max_workers: 并发数
         max_few_shots: Top-K 截断(可被 context_budget 覆盖)
         context_budget: 动态上下文预算
@@ -288,6 +292,13 @@ def parallel_trans_tool(
         }
     """
     translator = get_translator()
+
+    # 合并反馈提示到领域提示
+    if feedback_prompt:
+        if domain_prompt:
+            domain_prompt = f"{domain_prompt}\n\n{feedback_prompt}"
+        else:
+            domain_prompt = feedback_prompt
 
     # 建立 chunk_id → few_shots 映射,保证对齐
     few_shots_map = {

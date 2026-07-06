@@ -1,12 +1,14 @@
 # agent/graph.py
 """
 LangGraph Orchestrator
-将 5 个 Tool 编排为 Tool-Use 闭环:
-  fanout → chunk / term_extract → retrieve → parallel_trans → [repair] → stats → END
+将 5 个 Tool 编排为带自纠错的 Tool-Use 闭环:
+  fanout → chunk / term_extract → retrieve → parallel_trans → [repair] → stats
+   ↑_____________________________________________________________________↓ (当术语一致性不足时)
 
 设计原则:
   - chunk 与 term_extract 可并行(均只依赖 src_text)
   - parallel_trans 失败后自动进入 repair_trans 修复
+  - stats 检测术语一致性,不足时迭代重试(带硬上限)
   - 每个节点职责单一,只操作自己那一段 state
 """
 from langgraph.graph import StateGraph, END
@@ -19,6 +21,7 @@ from agent.tools import (
     repair_trans_tool,
     stats_tool,
 )
+from config import config
 
 
 # ============================================================
@@ -72,6 +75,7 @@ def run_parallel_trans(state: TranslationState) -> dict:
         "tgt_lang":             state["tgt_lang"],
         "domain":               state["domain"],
         "domain_prompt":        state.get("domain_prompt"),
+        "feedback_prompt":      state.get("feedback_prompt"),
         "context_budget":       state.get("context_budget"),
     })
     return {
@@ -122,6 +126,59 @@ def run_stats(state: TranslationState) -> dict:
     }
 
 
+def prepare_retry(state: TranslationState) -> dict:
+    """自纠错准备: 生成 feedback_prompt 并递增迭代计数"""
+    inconsistencies = state.get("terminology_stats", {}).get("inconsistencies", [])
+    if inconsistencies:
+        feedback = (
+            "上一轮译文术语一致性不足。请在本次翻译中严格使用以下术语对应关系: "
+            + "; ".join(inconsistencies[:10])
+        )
+    else:
+        feedback = "请提高术语翻译一致性,严格遵循术语表。"
+
+    return {
+        "iteration_count": state.get("iteration_count", 0) + 1,
+        "feedback_prompt": feedback,
+        # 清空上一轮结果,避免旧结果干扰
+        "translated_chunks": [],
+        "failed_chunks":     [],
+    }
+
+
+def route_after_stats(state: TranslationState) -> str:
+    """术语一致性不足且未达最大迭代次数时,返回 parallel_trans 重试"""
+    stats = state.get("terminology_stats") or {}
+    rate = stats.get("consistency_rate", 1.0)
+    iteration = state.get("iteration_count", 0)
+    max_iter = state.get("max_iterations", config.DEFAULT_MAX_ITERATIONS)
+    threshold = state.get("consistency_threshold", config.DEFAULT_CONSISTENCY_THRESHOLD)
+
+    if rate < threshold and iteration < max_iter:
+        return "retry"
+    return "end"
+
+
+def run_format_output(state: TranslationState) -> dict:
+    """输出格式化: 生成 Streamlit 兼容的 translation / statistics 别名"""
+    chunks = state.get("chunks", [])
+    term_stats = state.get("terminology_stats") or {}
+
+    return {
+        "translation": state.get("final_translation", ""),
+        "statistics": {
+            "source_length":          len(state.get("src_text", "")),
+            "translation_length":     len(state.get("final_translation", "")),
+            "num_chunks":             len(chunks),
+            "terminology_consistency_rate": term_stats.get("consistency_rate"),
+            "terminology_hit":             term_stats.get("terminology_hit"),
+            "terminology_total":           term_stats.get("terminology_total"),
+            "iteration_count":             state.get("iteration_count", 0),
+            "failed_chunks":               state.get("failed_chunks", []),
+        },
+    }
+
+
 # ============================================================
 # 构建 Graph
 # ============================================================
@@ -137,6 +194,8 @@ def build_patent_agent():
     graph.add_node("parallel_trans", run_parallel_trans)
     graph.add_node("repair_trans",   run_repair_trans)
     graph.add_node("stats",          run_stats)
+    graph.add_node("prepare_retry",  prepare_retry)
+    graph.add_node("format_output",  run_format_output)
 
     # fan-out: chunk 与 term_extract 并行,完成后汇入 retrieve
     graph.set_entry_point("fanout")
@@ -154,7 +213,15 @@ def build_patent_agent():
     )
     graph.add_edge("repair_trans", "stats")
 
-    graph.add_edge("stats", END)
+    # 自纠错循环: 一致性不足时回到 prepare_retry,再进入 parallel_trans
+    graph.add_conditional_edges(
+        "stats",
+        route_after_stats,
+        {"retry": "prepare_retry", "end": "format_output"}
+    )
+    graph.add_edge("prepare_retry", "parallel_trans")
+
+    graph.add_edge("format_output", END)
 
     return graph.compile()
 
