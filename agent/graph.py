@@ -1,13 +1,11 @@
 # agent/graph.py
 """
 LangGraph Orchestrator
-将 5 个 Tool 串联为纯线性 Tool-Use 闭环:
-  chunk → term_extract → retrieve → parallel_trans → stats → END
+将 5 个 Tool 编排为 Tool-Use 闭环:
+  fanout → chunk / term_extract → retrieve → parallel_trans → stats → END
 
 设计原则:
-  - 无分支(no conditional edges)
-  - 无重试(no retry loop)  
-  - 无降级(no fallback)
+  - chunk 与 term_extract 可并行(均只依赖 src_text)
   - 每个节点职责单一,只操作自己那一段 state
 """
 from langgraph.graph import StateGraph, END
@@ -25,8 +23,13 @@ from agent.tools import (
 # 节点函数(每个节点只写自己产出的字段)
 # ============================================================
 
+def fanout(state: TranslationState) -> dict:
+    """入口 fan-out: 触发可并行的独立分支"""
+    return {}
+
+
 def run_chunk(state: TranslationState) -> dict:
-    """节点 1:分块"""
+    """分支 1:分块"""
     result = chunk_tool.invoke({
         "src_text": state["src_text"],
         "context_budget": state.get("context_budget"),
@@ -35,7 +38,7 @@ def run_chunk(state: TranslationState) -> dict:
 
 
 def run_term_extract(state: TranslationState) -> dict:
-    """节点 2:术语表获取(glossary or 自动抽取)"""
+    """分支 2:术语表获取(glossary or 自动抽取)"""
     result = term_extract_tool.invoke({
         "src_text": state["src_text"],
         "src_lang": state["src_lang"],
@@ -69,7 +72,10 @@ def run_parallel_trans(state: TranslationState) -> dict:
         "domain_prompt":        state.get("domain_prompt"),
         "context_budget":       state.get("context_budget"),
     })
-    return {"translated_chunks": result["translated_chunks"]}
+    return {
+        "translated_chunks": result["translated_chunks"],
+        "failed_chunks":     result["failed_chunks"],
+    }
 
 
 def run_stats(state: TranslationState) -> dict:
@@ -91,22 +97,25 @@ def run_stats(state: TranslationState) -> dict:
 
 def build_patent_agent():
     graph = StateGraph(TranslationState)
-    
+
     # 注册节点
+    graph.add_node("fanout",         fanout)
     graph.add_node("chunk",          run_chunk)
     graph.add_node("term_extract",   run_term_extract)
     graph.add_node("retrieve",       run_retrieve)
     graph.add_node("parallel_trans", run_parallel_trans)
     graph.add_node("stats",          run_stats)
-    
-    # 纯线性边
-    graph.set_entry_point("chunk")
-    graph.add_edge("chunk",          "term_extract")
+
+    # fan-out: chunk 与 term_extract 并行,完成后汇入 retrieve
+    graph.set_entry_point("fanout")
+    graph.add_edge("fanout",         "chunk")
+    graph.add_edge("fanout",         "term_extract")
+    graph.add_edge("chunk",          "retrieve")
     graph.add_edge("term_extract",   "retrieve")
     graph.add_edge("retrieve",       "parallel_trans")
     graph.add_edge("parallel_trans", "stats")
     graph.add_edge("stats",          END)
-    
+
     return graph.compile()
 
 
