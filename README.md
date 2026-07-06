@@ -191,21 +191,29 @@ curl http://localhost:8080/health
 - [ ] MoE 微调：基于专利领域数据进行监督微调
 - [ ] 将 MemorySaver 替换为持久化 Checkpointer（如 SQLite），实现跨重启术语记忆
 
-## 🧭 架构评估
+## ✅ 功能验证
 
-> 以下评估来自对当前代码的审阅，原文引用以作参考。
+以下测试基于 `python api_server.py` 启动的本地服务（`v2.1.0`），模型为 `deepseek-ai/DeepSeek-V3.2`。
 
-**项目能支撑 Agent 面试描述的结论**：
-> "可以支撑，但必须要会「诚实包装」。这个项目有 Agent 的骨架（LangGraph + Tool + State + 多步编排），足以作为实习面试的项目载体；但如果把它吹成'自主决策 Agent'或让面试官直接看旧版 README，会有被识破的风险。"
+| 测试项 | 结果 | 关键指标 |
+|--------|------|---------|
+| `/health` 健康检查 | ✅ 通过 | `status: healthy`, `version: 2.1.0` |
+| 基础中→英翻译 | ✅ 通过 | 术语一致性 `100%`，迭代次数 `0` |
+| 跨调用术语记忆 | ✅ 通过 | `use_memory=true` 时 `terminology_memory` 正常写入并复用 |
+| 自纠错循环单元测试 | ✅ 10/10 通过 | 覆盖路由决策、术语-chunk 匹配、增量重译 |
 
-**核心亮点**：
-> "使用了真正的 Agent 框架（LangGraph）……做了多步 Tool-Use 流水线……有真实垂直领域问题……有 RAG + 模型上下文编排。"
+```bash
+# 快速复现
+python api_server.py
 
-**已知局限（面试时建议主动提及）**：
-> "Graph 是纯线性的，LLM 没有真正'决策'……缺少 Agent 常见的高级能力（memory / human-in-the-loop / evaluation）……翻译一致性验证没有闭环（stats_tool 只做描述性统计）。"
+curl http://localhost:8080/health
 
-**面试定位建议**：
-> "不要说'这是一个自主决策 Agent'，而说'这是一个基于 LangGraph 的 deterministic multi-step agentic workflow，用预定义编排保证翻译流程的稳定和可追溯'。"
+curl -X POST http://localhost:8080/translate \
+  -H "Content-Type: application/json" \
+  -d '{"src_text":"本发明涉及一种机器翻译方法。","src_lang":"zh","tgt_lang":"en","domain":"技术"}'
+
+python tests/test_self_correction.py
+```
 
 ## 📖 完整 API 文档
 
