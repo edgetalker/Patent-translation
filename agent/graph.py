@@ -12,6 +12,7 @@ LangGraph Orchestrator
   - 每个节点职责单一,只操作自己那一段 state
 """
 from langgraph.graph import StateGraph, END
+from typing import List, Dict
 from agent.state import TranslationState
 from agent.tools import (
     chunk_tool,
@@ -77,6 +78,8 @@ def run_parallel_trans(state: TranslationState) -> dict:
         "domain":               state["domain"],
         "domain_prompt":        state.get("domain_prompt"),
         "feedback_prompt":      state.get("feedback_prompt"),
+        "translated_chunks":    state.get("translated_chunks"),
+        "retry_chunk_ids":      state.get("retry_chunk_ids"),
         "context_budget":       state.get("context_budget"),
     })
     return {
@@ -127,23 +130,56 @@ def run_stats(state: TranslationState) -> dict:
     }
 
 
+def _extract_source_terms(inconsistencies: List[str]) -> List[str]:
+    """
+    从 inconsistencies 列表中提取源术语。
+    inconsistencies 格式: ['源术语 -> 目标术语', ...]
+    """
+    terms = []
+    for item in inconsistencies:
+        if "->" in item:
+            source = item.split("->")[0].strip()
+            if source:
+                terms.append(source)
+    return terms
+
+
+def _find_chunks_with_terms(chunks: List[Dict], terms: List[str]) -> List[int]:
+    """
+    返回包含任意一个术语的 chunk_id 列表。
+    """
+    if not terms:
+        return []
+    matched_ids = []
+    for chunk in chunks:
+        text = chunk.get("text", "")
+        if any(term in text for term in terms):
+            matched_ids.append(chunk["chunk_id"])
+    return matched_ids
+
+
 def prepare_retry(state: TranslationState) -> dict:
-    """自纠错准备: 生成 feedback_prompt 并递增迭代计数"""
+    """自纠错准备: 生成 feedback_prompt、计算需要重译的 chunk_id、递增迭代计数"""
     inconsistencies = state.get("terminology_stats", {}).get("inconsistencies", [])
     if inconsistencies:
         feedback = (
             "上一轮译文术语一致性不足。请在本次翻译中严格使用以下术语对应关系: "
             + "; ".join(inconsistencies[:10])
         )
+        retry_terms = _extract_source_terms(inconsistencies)
+        retry_chunk_ids = _find_chunks_with_terms(
+            state.get("chunks", []), retry_terms
+        )
     else:
         feedback = "请提高术语翻译一致性,严格遵循术语表。"
+        retry_chunk_ids = []
 
     return {
         "iteration_count": state.get("iteration_count", 0) + 1,
         "feedback_prompt": feedback,
-        # 清空上一轮结果,避免旧结果干扰
-        "translated_chunks": [],
-        "failed_chunks":     [],
+        "retry_chunk_ids": retry_chunk_ids,
+        # 保留 translated_chunks,prepare_retry 不清空旧结果
+        "failed_chunks":   [],
     }
 
 

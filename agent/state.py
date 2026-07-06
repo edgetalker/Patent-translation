@@ -36,6 +36,7 @@ class TranslationState(TypedDict):
     terminology_memory: Dict[str, str]        # 跨调用术语记忆
     iteration_count: int                      # 当前自纠错迭代次数
     feedback_prompt: Optional[str]            # 自纠错反馈提示
+    retry_chunk_ids: List[int]                # 需要重译的 chunk_id 列表
 
     # ── 最终结果 ────────────────────────────────────
     final_translation: str

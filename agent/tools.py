@@ -268,16 +268,17 @@ def parallel_trans_tool(
     domain: str,
     domain_prompt: Optional[str] = None,
     feedback_prompt: Optional[str] = None,
+    translated_chunks: Optional[List[str]] = None,
+    retry_chunk_ids: Optional[List[int]] = None,
     max_workers: int = 3,
     max_few_shots: int = 5,
     context_budget: Optional[Dict] = None,
 ) -> Dict:
     """
     【并行翻译工具】
-    消费预检索结果,并发翻译所有 chunks。
-    每个 worker 使用对应 chunk 的 few_shots,内部不再触发检索。
-    支持通过 context_budget 动态调整术语注入和 few-shot 数量。
-    支持 feedback_prompt 自纠错反馈。
+    消费预检索结果,并发翻译 chunks。
+    支持增量重试: 提供 translated_chunks 和 retry_chunk_ids 时,仅重译指定 chunk,
+    其余 chunk 保留已有译文。
 
     Args:
         chunks: 分块列表
@@ -285,6 +286,8 @@ def parallel_trans_tool(
         term_dict: 术语表(全文级,translate_chunk 内部会再做 chunk 级过滤)
         domain_prompt: 领域级额外指令
         feedback_prompt: 自纠错反馈提示(追加到 domain_prompt)
+        translated_chunks: 上一轮译文(增量重试时使用)
+        retry_chunk_ids: 需要重译的 chunk_id 列表(为空则翻译全部)
         max_workers: 并发数
         max_few_shots: Top-K 截断(可被 context_budget 覆盖)
         context_budget: 动态上下文预算
@@ -311,8 +314,30 @@ def parallel_trans_tool(
         for item in retrieval_per_chunk
     }
 
-    translations: List[Optional[str]] = [None] * len(chunks)
+    # 初始化译文数组: 优先复用上一轮结果
+    prev_translations = translated_chunks or [None] * len(chunks)
+    if len(prev_translations) != len(chunks):
+        # 防御性处理: 长度不匹配时清空
+        prev_translations = [None] * len(chunks)
+
+    translations: List[Optional[str]] = list(prev_translations)
     failed_chunks: List[int] = []
+
+    # 决定哪些 chunk 需要翻译
+    retry_set = set(retry_chunk_ids) if retry_chunk_ids else set()
+    if not retry_set:
+        # 无指定重试列表时,翻译所有尚未有译文的 chunk
+        indices_to_translate = [
+            i for i in range(len(chunks))
+            if translations[i] is None or not translations[i].strip()
+        ]
+        if not indices_to_translate:
+            indices_to_translate = list(range(len(chunks)))
+    else:
+        indices_to_translate = [
+            i for i, chunk in enumerate(chunks)
+            if chunk["chunk_id"] in retry_set
+        ]
 
     def translate_task(idx: int) -> tuple:
         chunk = chunks[idx]
@@ -351,18 +376,21 @@ def parallel_trans_tool(
         except Exception as e:
             return idx, f"[TRANSLATION FAILED: chunk {cid}]", str(e)
 
-    # 并发执行
+    # 并发执行(仅对需要翻译的 chunk)
     start = time.time()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(translate_task, i) for i in range(len(chunks))]
-        for future in concurrent.futures.as_completed(futures):
-            idx, translation, err = future.result()
-            translations[idx] = translation
-            if err:
-                failed_chunks.append(chunks[idx]["chunk_id"])
-                print(f"[parallel_trans_tool] chunk {idx} 失败: {err}")
-            else:
-                print(f"[parallel_trans_tool] 完成 chunk {idx+1}/{len(chunks)}")
+    if indices_to_translate:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(translate_task, i) for i in indices_to_translate]
+            for future in concurrent.futures.as_completed(futures):
+                idx, translation, err = future.result()
+                translations[idx] = translation
+                if err:
+                    failed_chunks.append(chunks[idx]["chunk_id"])
+                    print(f"[parallel_trans_tool] chunk {idx} 失败: {err}")
+                else:
+                    print(f"[parallel_trans_tool] 完成 chunk {idx+1}/{len(chunks)}")
+    else:
+        print("[parallel_trans_tool] 所有 chunk 已有译文,跳过翻译")
 
     elapsed = time.time() - start
     print(f"[parallel_trans_tool] 总翻译耗时: {elapsed:.2f}s")
