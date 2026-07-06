@@ -26,24 +26,50 @@ app = FastAPI(
     version="2.1.0",
 )
 
-# ==================== 初始化 ====================
+# ==================== 懒加载初始化 ====================
+# Embedding / Qdrant 仅在启用语料库时才实例化,避免基础翻译验证依赖 Embedding 服务
 
-embedding_service = EmbeddingService()
-corpus_manager = CorpusManager(
-    qdrant_url=config.QDRANT_URL,
-    qdrant_api_key=config.QDRANT_API_KEY,
-    collection_name=config.QDRANT_COLLECTION_NAME,
-    embedding_service=embedding_service,
-)
+_embedding_service = None
+_corpus_manager = None
 
-# Agent 工具层初始化(注入 corpus_manager 到全局单例)
-init_tools(corpus_manager=corpus_manager)
+
+def get_embedding_service():
+    global _embedding_service
+    if _embedding_service is None:
+        _embedding_service = EmbeddingService()
+    return _embedding_service
+
+
+def get_corpus_manager():
+    global _corpus_manager
+    if _corpus_manager is None:
+        _corpus_manager = CorpusManager(
+            qdrant_url=config.QDRANT_URL,
+            qdrant_api_key=config.QDRANT_API_KEY,
+            collection_name=config.QDRANT_COLLECTION_NAME,
+            embedding_service=get_embedding_service(),
+        )
+    return _corpus_manager
+
+
+# Agent 工具层初始化(默认不注入 corpus_manager,RAG 按需启用)
+init_tools(corpus_manager=None)
 
 # 使用 MemorySaver 初始化带 checkpointer 的 Agent
 patent_agent = build_patent_agent(checkpointer=get_memory_saver())
 
 # 术语提取器:用于独立的 /extract_terminology 端点
 term_extractor = TerminologyExtractor()
+
+
+def _ensure_corpus_manager():
+    """确保 corpus_manager 已初始化,供语料库端点调用"""
+    return get_corpus_manager()
+
+
+def is_corpus_configured() -> bool:
+    """判断语料库是否已配置(不触发实际初始化)"""
+    return bool(config.EMBED_BASE_URL) and bool(config.QDRANT_URL)
 
 
 # ==================== 数据模型 ====================
@@ -132,7 +158,7 @@ async def root():
             "llm_model": config.LLM_MODEL_NAME,
             "max_terms": config.MAX_TERMS,
             "window_size": config.WINDOW_SIZE,
-            "corpus_enabled": corpus_manager is not None,
+            "corpus_enabled": is_corpus_configured(),
         },
     }
 
@@ -174,7 +200,7 @@ async def health_check():
         "config": {
             "llm_base_url": config.LLM_BASE_URL,
             "llm_model": config.LLM_MODEL_NAME,
-            "corpus_enabled": corpus_manager is not None,
+            "corpus_enabled": is_corpus_configured(),
         },
     }
 
@@ -210,6 +236,10 @@ async def translate_document(request: TranslationRequest):
         }
 
         thread_id = request.thread_id or "default"
+
+        # 若启用语料库,懒加载并注入 RetrievalService
+        if request.use_corpus:
+            init_tools(corpus_manager=_ensure_corpus_manager())
 
         # 运行 Agent(带 checkpointer)
         result_state = patent_agent.invoke(
@@ -316,7 +346,7 @@ async def extract_terminology(request: TerminologyExtractionRequest):
 async def add_corpus(request: AddCorpusRequest):
     try:
         entries = [entry.dict() for entry in request.entries]
-        result = await corpus_manager.add_corpus_entries(
+        result = await _ensure_corpus_manager().add_corpus_entries(
             entries=entries,
             corpus_id=request.corpus_id,
         )
@@ -328,7 +358,7 @@ async def add_corpus(request: AddCorpusRequest):
 @app.post("/corpus/search")
 async def search_corpus(request: SearchRequest):
     try:
-        results = await corpus_manager.search_similar(
+        results = await _ensure_corpus_manager().search_similar(
             query_text=request.query,
             corpus_id=request.corpus_id,
             limit=request.limit,
@@ -346,7 +376,7 @@ async def search_corpus(request: SearchRequest):
 @app.delete("/corpus/{corpus_id}")
 async def delete_corpus(corpus_id: str):
     try:
-        result = corpus_manager.delete_corpus(corpus_id)
+        result = _ensure_corpus_manager().delete_corpus(corpus_id)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -355,7 +385,7 @@ async def delete_corpus(corpus_id: str):
 @app.get("/corpus/stats")
 async def get_stats(corpus_id: Optional[str] = None):
     try:
-        stats = corpus_manager.get_corpus_stats(corpus_id)
+        stats = _ensure_corpus_manager().get_corpus_stats(corpus_id)
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
