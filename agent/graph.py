@@ -50,6 +50,7 @@ def run_term_extract(state: TranslationState) -> dict:
         "tgt_lang": state["tgt_lang"],
         "domain":   state["domain"],
         "glossary": state.get("glossary"),
+        "terminology_memory": state.get("terminology_memory") if state.get("use_memory") else None,
     })
     return {"term_dict": result["term_dict"]}
 
@@ -160,12 +161,20 @@ def route_after_stats(state: TranslationState) -> str:
 
 
 def run_format_output(state: TranslationState) -> dict:
-    """输出格式化: 生成 Streamlit 兼容的 translation / statistics 别名"""
+    """输出格式化: 生成 Streamlit 兼容的 translation / statistics 别名,并更新术语记忆"""
     chunks = state.get("chunks", [])
     term_stats = state.get("terminology_stats") or {}
 
+    # 更新术语记忆: 合并历史记忆与本次术语表
+    new_memory = dict(state.get("terminology_memory", {}))
+    new_memory.update(state.get("term_dict", {}))
+    # 限制记忆大小,避免无限增长
+    if len(new_memory) > 200:
+        new_memory = dict(list(new_memory.items())[-200:])
+
     return {
         "translation": state.get("final_translation", ""),
+        "terminology_memory": new_memory if state.get("use_memory") else None,
         "statistics": {
             "source_length":          len(state.get("src_text", "")),
             "translation_length":     len(state.get("final_translation", "")),
@@ -183,7 +192,7 @@ def run_format_output(state: TranslationState) -> dict:
 # 构建 Graph
 # ============================================================
 
-def build_patent_agent():
+def build_patent_agent(checkpointer=None):
     graph = StateGraph(TranslationState)
 
     # 注册节点
@@ -223,8 +232,8 @@ def build_patent_agent():
 
     graph.add_edge("format_output", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 
 
-# 全局 Agent 实例
+# 全局 Agent 实例(默认无 checkpointer,由 api_server 注入)
 patent_agent = build_patent_agent()

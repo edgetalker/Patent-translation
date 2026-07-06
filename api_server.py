@@ -10,8 +10,9 @@ from pydantic import BaseModel
 from typing import Optional, Dict, List
 import uvicorn
 
-from agent.graph import patent_agent
+from agent.graph import build_patent_agent
 from agent.tools import init_tools
+from agent.memory import get_memory_saver
 
 from config import config
 from terminology_extraction import TerminologyExtractor
@@ -21,7 +22,7 @@ from corpus.manager import CorpusManager
 app = FastAPI(
     title="Document Translation API",
     description="专利翻译智能体",
-    version="2.0.0",
+    version="2.1.0",
 )
 
 # ==================== 初始化 ====================
@@ -36,6 +37,9 @@ corpus_manager = CorpusManager(
 
 # Agent 工具层初始化(注入 corpus_manager 到全局单例)
 init_tools(corpus_manager=corpus_manager)
+
+# 使用 MemorySaver 初始化带 checkpointer 的 Agent
+patent_agent = build_patent_agent(checkpointer=get_memory_saver())
 
 # 术语提取器:用于独立的 /extract_terminology 端点
 term_extractor = TerminologyExtractor()
@@ -52,8 +56,15 @@ class TranslationRequest(BaseModel):
     glossary: Optional[Dict[str, str]] = None
     domain_prompt: Optional[str] = None
     use_corpus: bool = False
-    corpus_id: Optional[str] = None           
+    corpus_id: Optional[str] = None
     corpus_threshold: float = 0.85
+
+    # Agent 控制参数
+    max_iterations: Optional[int] = 2
+    consistency_threshold: Optional[float] = 0.85
+    thread_id: Optional[str] = None
+    use_memory: bool = False
+    context_budget: Optional[Dict] = None
 
 
 class TranslationResponse(BaseModel):
@@ -62,8 +73,11 @@ class TranslationResponse(BaseModel):
     term_dict: Dict[str, str]
     chunks_info: List[Dict]
     statistics: Dict
-    terminology_stats: Optional[Dict] = None     
-    retrieval_stats: Optional[Dict] = None       
+    terminology_stats: Optional[Dict] = None
+    retrieval_stats: Optional[Dict] = None
+    iteration_count: Optional[int] = None
+    failed_chunks: Optional[List[int]] = None
+    terminology_memory: Optional[Dict[str, str]] = None
 
 
 class TerminologyExtractionRequest(BaseModel):
@@ -169,48 +183,66 @@ async def health_check():
 @app.post("/translate", response_model=TranslationResponse)
 async def translate_document(request: TranslationRequest):
     """
-    翻译长文档(Agent 线性主干)
-    
-    流程:chunk → term_extract → retrieve → parallel_trans → stats
+    翻译长文档(Agent 自纠错 workflow)
+
+    流程:fanout → chunk / term_extract → retrieve → parallel_trans → [repair]
+         → stats → [prepare_retry loop] → format_output
     """
     try:
         # 构建初始 State(只传输入字段,节点产出字段由 graph 自动填充)
         initial_state = {
-            "src_text":         request.src_text,
-            "src_lang":         request.src_lang,
-            "tgt_lang":         request.tgt_lang,
-            "domain":           request.domain,
-            "glossary":         request.glossary,
-            "domain_prompt":    request.domain_prompt,
-            "use_corpus":       request.use_corpus,
-            "corpus_id":        request.corpus_id,
-            "corpus_threshold": request.corpus_threshold,
+            "src_text":              request.src_text,
+            "src_lang":              request.src_lang,
+            "tgt_lang":              request.tgt_lang,
+            "domain":                request.domain,
+            "glossary":              request.glossary,
+            "domain_prompt":         request.domain_prompt,
+            "use_corpus":            request.use_corpus,
+            "corpus_id":             request.corpus_id,
+            "corpus_threshold":      request.corpus_threshold,
+            "max_iterations":        request.max_iterations,
+            "consistency_threshold": request.consistency_threshold,
+            "use_memory":            request.use_memory,
+            "context_budget":        request.context_budget,
+            "iteration_count":       0,
+            "failed_chunks":         [],
         }
 
-        # 运行 Agent
-        result_state = patent_agent.invoke(initial_state)
+        thread_id = request.thread_id or "default"
+
+        # 运行 Agent(带 checkpointer)
+        result_state = patent_agent.invoke(
+            initial_state,
+            config={"configurable": {"thread_id": thread_id}},
+        )
 
         # 组装响应
         term_stats = result_state.get("terminology_stats") or {}
         retrieval_results = result_state.get("retrieval_results") or {}
+        statistics = result_state.get("statistics") or {}
 
         return {
-            "translation": result_state.get("final_translation", ""),
-            "term_dict":   result_state.get("term_dict", {}),
+            "translation":        result_state.get("translation", result_state.get("final_translation", "")),
+            "term_dict":          result_state.get("term_dict", {}),
             "chunks_info": [
                 {"chunk_id": c["chunk_id"], "length": len(c["text"])}
                 for c in result_state.get("chunks", [])
             ],
             "statistics": {
-                "source_length":          len(request.src_text),
-                "translation_length":     len(result_state.get("final_translation", "")),
-                "num_chunks":             len(result_state.get("chunks", [])),
+                "source_length":               len(request.src_text),
+                "translation_length":          len(result_state.get("final_translation", "")),
+                "num_chunks":                  len(result_state.get("chunks", [])),
                 "terminology_consistency_rate": term_stats.get("consistency_rate"),
                 "terminology_hit":             term_stats.get("terminology_hit"),
                 "terminology_total":           term_stats.get("terminology_total"),
+                "iteration_count":             statistics.get("iteration_count", 0),
+                "failed_chunks":               statistics.get("failed_chunks", []),
             },
-            "terminology_stats": term_stats or None,
-            "retrieval_stats":   retrieval_results.get("stats") if retrieval_results else None,
+            "terminology_stats":  term_stats or None,
+            "retrieval_stats":    retrieval_results.get("stats") if retrieval_results else None,
+            "iteration_count":    statistics.get("iteration_count", 0),
+            "failed_chunks":      statistics.get("failed_chunks", []),
+            "terminology_memory": result_state.get("terminology_memory") if request.use_memory else None,
         }
 
     except Exception as e:

@@ -93,13 +93,15 @@ def term_extract_tool(
     tgt_lang: str,
     domain: str,
     glossary: Optional[Dict[str, str]] = None,
+    terminology_memory: Optional[Dict[str, str]] = None,
 ) -> Dict:
     """
     【术语提取工具】
     术语表获取策略:
     - 有 glossary → 直接使用(绕过 LLM 调用,节省成本)
     - 无 glossary → 滑动窗口提取 + LLM 翻译
-    
+    - 启用记忆时 → 合并历史 terminology_memory(glossary 优先级最高)
+
     Returns:
         {
             "term_dict": Dict[str, str],  # {源术语: 目标术语}
@@ -109,30 +111,33 @@ def term_extract_tool(
     """
     if glossary:
         print(f"[term_extract_tool] 使用外部术语表,共 {len(glossary)} 个")
-        return {
-            "term_dict": glossary,
-            "term_count": len(glossary),
-            "source": "glossary",
-        }
-    
-    extractor = get_term_extractor()
-    terms = extractor.sliding_window_extract(
-        text=src_text,
-        src_lang=src_lang,
-        domain=domain,
-    )
-    term_dict = extractor.translate_terminology(
-        terms=terms,
-        src_lang=src_lang,
-        tgt_lang=tgt_lang,
-        domain=domain,
-    )
-    
-    print(f"[term_extract_tool] 抽取并翻译 {len(term_dict)} 个术语")
+        term_dict = dict(glossary)
+    else:
+        extractor = get_term_extractor()
+        terms = extractor.sliding_window_extract(
+            text=src_text,
+            src_lang=src_lang,
+            domain=domain,
+        )
+        term_dict = extractor.translate_terminology(
+            terms=terms,
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            domain=domain,
+        )
+        print(f"[term_extract_tool] 抽取并翻译 {len(term_dict)} 个术语")
+
+    # 合并历史术语记忆: glossary/本次提取优先,记忆作为补充
+    if terminology_memory:
+        merged = dict(terminology_memory)
+        merged.update(term_dict)
+        term_dict = merged
+        print(f"[term_extract_tool] 合并历史术语记忆后共 {len(term_dict)} 个")
+
     return {
         "term_dict": term_dict,
         "term_count": len(term_dict),
-        "source": "extracted",
+        "source": "glossary" if glossary else "extracted",
     }
 
 @tool
