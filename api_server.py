@@ -3,7 +3,8 @@ FastAPI 服务端点
 提供 RESTful API 接口
 
 对齐主干架构:
-  chunk → term_extract → retrieve → parallel_trans → stats → END
+  fanout → chunk / term_extract → retrieve → parallel_trans → [repair]
+           → stats → [prepare_retry loop] → format_output → END
 """
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -126,7 +127,7 @@ class SearchRequest(BaseModel):
 async def root():
     return {
         "status": "running",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "config": {
             "llm_model": config.LLM_MODEL_NAME,
             "max_terms": config.MAX_TERMS,
@@ -169,7 +170,7 @@ async def get_config():
 async def health_check():
     return {
         "status": "healthy",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "config": {
             "llm_base_url": config.LLM_BASE_URL,
             "llm_model": config.LLM_MODEL_NAME,
