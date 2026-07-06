@@ -2,10 +2,11 @@
 """
 LangGraph Orchestrator
 将 5 个 Tool 编排为 Tool-Use 闭环:
-  fanout → chunk / term_extract → retrieve → parallel_trans → stats → END
+  fanout → chunk / term_extract → retrieve → parallel_trans → [repair] → stats → END
 
 设计原则:
   - chunk 与 term_extract 可并行(均只依赖 src_text)
+  - parallel_trans 失败后自动进入 repair_trans 修复
   - 每个节点职责单一,只操作自己那一段 state
 """
 from langgraph.graph import StateGraph, END
@@ -15,6 +16,7 @@ from agent.tools import (
     term_extract_tool,
     retrieve_tool,
     parallel_trans_tool,
+    repair_trans_tool,
     stats_tool,
 )
 
@@ -78,6 +80,35 @@ def run_parallel_trans(state: TranslationState) -> dict:
     }
 
 
+def run_repair_trans(state: TranslationState) -> dict:
+    """节点 4.5:修复并行翻译中失败的 chunk"""
+    if not state.get("failed_chunks"):
+        return {}
+
+    result = repair_trans_tool.invoke({
+        "chunks":              state["chunks"],
+        "translated_chunks":   state["translated_chunks"],
+        "failed_chunks":       state["failed_chunks"],
+        "retrieval_per_chunk": state["retrieval_results"]["per_chunk"],
+        "term_dict":           state["term_dict"],
+        "src_lang":            state["src_lang"],
+        "tgt_lang":            state["tgt_lang"],
+        "domain":              state["domain"],
+        "domain_prompt":       state.get("domain_prompt"),
+    })
+    return {
+        "translated_chunks": result["translated_chunks"],
+        "failed_chunks":     result["failed_chunks"],
+    }
+
+
+def route_after_parallel_trans(state: TranslationState) -> str:
+    """若存在失败 chunk,进入 repair_trans;否则直接统计"""
+    if state.get("failed_chunks"):
+        return "repair_trans"
+    return "stats"
+
+
 def run_stats(state: TranslationState) -> dict:
     """节点 5:术语一致性统计 + 拼接全文"""
     result = stats_tool.invoke({
@@ -104,6 +135,7 @@ def build_patent_agent():
     graph.add_node("term_extract",   run_term_extract)
     graph.add_node("retrieve",       run_retrieve)
     graph.add_node("parallel_trans", run_parallel_trans)
+    graph.add_node("repair_trans",   run_repair_trans)
     graph.add_node("stats",          run_stats)
 
     # fan-out: chunk 与 term_extract 并行,完成后汇入 retrieve
@@ -113,8 +145,16 @@ def build_patent_agent():
     graph.add_edge("chunk",          "retrieve")
     graph.add_edge("term_extract",   "retrieve")
     graph.add_edge("retrieve",       "parallel_trans")
-    graph.add_edge("parallel_trans", "stats")
-    graph.add_edge("stats",          END)
+
+    # 翻译失败时进入修复节点,修复后进入统计
+    graph.add_conditional_edges(
+        "parallel_trans",
+        route_after_parallel_trans,
+        {"repair_trans": "repair_trans", "stats": "stats"}
+    )
+    graph.add_edge("repair_trans", "stats")
+
+    graph.add_edge("stats", END)
 
     return graph.compile()
 

@@ -172,6 +172,7 @@ class DocumentTranslator:
         few_shots: Optional[List[Tuple[str, str, float]]] = None,
         max_few_shots: int = 5,
         context_budget: Optional[Dict] = None,
+        repair_mode: bool = False,
     ) -> str:
         """
         翻译单个文本块(纯翻译函数)
@@ -194,16 +195,25 @@ class DocumentTranslator:
             few_shots: 预检索好的 Few-Shot 参考 [(corpus_src, corpus_tgt, sim), ...]
             max_few_shots: Top-K 截断数量
             context_budget: 动态上下文预算,覆盖 max_inject_terms / max_few_shots
+            repair_mode: 是否为修复模式(关闭 few_shots,附加修复提示)
 
         Returns:
             译文字符串(失败时返回 "[TRANSLATION FAILED: ...]" 占位)
         """
         chunk_start = time.time()
 
+        # 修复模式: 丢弃 few_shots,追加修复提示
+        if repair_mode:
+            few_shots = []
+            repair_note = "【修复重试】请严格遵循术语表,保持译文准确完整。"
+            domain_prompt = f"{domain_prompt}\n{repair_note}" if domain_prompt else repair_note
+
         # 动态上下文预算
         budget = context_budget or {}
         max_inject_terms = budget.get("max_inject_terms", config.MAX_INJECT_TERMS)
         effective_max_few_shots = budget.get("max_few_shots", max_few_shots)
+        if repair_mode:
+            effective_max_few_shots = 0
 
         # ---------- Step 1: 术语表过滤 ----------
         relevant_terms = None

@@ -357,6 +357,109 @@ def parallel_trans_tool(
         "failed_chunks": failed_chunks,
     }
 
+
+@tool
+def repair_trans_tool(
+    chunks: List[Dict],
+    translated_chunks: List[str],
+    failed_chunks: List[int],
+    retrieval_per_chunk: List[Dict],
+    term_dict: Dict[str, str],
+    src_lang: str,
+    tgt_lang: str,
+    domain: str,
+    domain_prompt: Optional[str] = None,
+) -> Dict:
+    """
+    【翻译修复工具】
+    针对 parallel_trans_tool 返回的失败 chunk 进行单线程修复重译。
+
+    修复策略:
+    - 关闭 few_shots,避免有问题的参考示例干扰
+    - 附加修复提示,要求严格遵循术语表
+    - 单线程顺序执行,降低并发带来的不稳定因素
+
+    Args:
+        chunks: 全部分块列表
+        translated_chunks: 当前译文列表(会被原地更新)
+        failed_chunks: 失败的 chunk_id 列表
+        retrieval_per_chunk: retrieve_tool 输出的 per_chunk 字段
+        term_dict: 术语表
+        src_lang / tgt_lang / domain: 翻译参数
+        domain_prompt: 领域级额外指令
+
+    Returns:
+        {
+            "translated_chunks": List[str],  # 更新后的译文列表
+            "failed_chunks": List[int],      # 修复后仍失败的 chunk_id
+        }
+    """
+    if not failed_chunks:
+        return {"translated_chunks": translated_chunks, "failed_chunks": []}
+
+    translator = get_translator()
+    few_shots_map = {
+        item["chunk_id"]: item["few_shots"]
+        for item in retrieval_per_chunk
+    }
+
+    chunk_map = {chunk["chunk_id"]: chunk for chunk in chunks}
+    still_failed: List[int] = []
+
+    print(f"[repair_trans_tool] 开始修复 {len(failed_chunks)} 个失败 chunk: {failed_chunks}")
+
+    for cid in failed_chunks:
+        chunk = chunk_map.get(cid)
+        if chunk is None:
+            still_failed.append(cid)
+            continue
+
+        per_chunk_budget = calculate_context_budget(
+            chunk_text=chunk["text"],
+            system_overhead=config.SYSTEM_PROMPT_OVERHEAD,
+            term_dict=term_dict,
+            model_context_window=config.MODEL_CONTEXT_WINDOW,
+            max_output_tokens=config.MAX_TOKENS,
+            safe_margin=config.SAFE_MARGIN,
+        )
+
+        try:
+            translation = translator.translate_chunk(
+                chunk_text=chunk["text"],
+                chunk_id=cid,
+                total_chunks=len(chunks),
+                src_lang=src_lang,
+                tgt_lang=tgt_lang,
+                domain=domain,
+                term_dict=term_dict,
+                domain_prompt=domain_prompt,
+                few_shots=[],
+                max_few_shots=0,
+                context_budget=per_chunk_budget,
+                repair_mode=True,
+            )
+
+            # 找到 translated_chunks 中对应的位置并更新
+            for idx, c in enumerate(chunks):
+                if c["chunk_id"] == cid:
+                    translated_chunks[idx] = translation
+                    break
+
+            if translation.startswith("[TRANSLATION FAILED"):
+                still_failed.append(cid)
+                print(f"[repair_trans_tool] chunk {cid} 修复后仍失败")
+            else:
+                print(f"[repair_trans_tool] chunk {cid} 修复成功")
+
+        except Exception as e:
+            still_failed.append(cid)
+            print(f"[repair_trans_tool] chunk {cid} 修复异常: {e}")
+
+    return {
+        "translated_chunks": translated_chunks,
+        "failed_chunks": still_failed,
+    }
+
 @tool
 def stats_tool(
     translated_chunks: List[str],
